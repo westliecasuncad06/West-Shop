@@ -64,6 +64,12 @@ function get_featured_products(int $limit = 8): array {
     return $stmt->fetchAll();
 }
 
+function product_image_src(?string $image, string $placeholder = 'https://via.placeholder.com/400x300?text=Product'): string {
+    if (!$image || trim($image) === '') return $placeholder;
+    if (preg_match('/^https?:\/\//i', $image)) return $image;
+    return base_url(ltrim($image, '/'));
+}
+
 function create_notification(int $userId, string $message): void {
     global $pdo; $stmt = $pdo->prepare('INSERT INTO notifications(user_id, message) VALUES (?,?)'); $stmt->execute([$userId, $message]);
 }
@@ -169,4 +175,59 @@ function calc_coupon_discount(array $coupon, float $subtotal): float {
         return round($subtotal * ((float)$coupon['value'] / 100.0), 2);
     }
     return min((float)$coupon['value'], $subtotal);
+}
+
+// Store helpers (seller profiles, follows, ratings)
+function get_seller_profile(int $sellerId): ?array {
+    global $pdo;
+    $s = $pdo->prepare('SELECT sp.*, u.name AS seller_name, u.user_id AS seller_id
+                        FROM seller_profiles sp
+                        JOIN users u ON u.user_id = sp.seller_id
+                        WHERE sp.seller_id = ? LIMIT 1');
+    $s->execute([$sellerId]);
+    $row = $s->fetch();
+    if (!$row) {
+        // Create a minimal virtual profile using users table
+        $u = $pdo->prepare('SELECT user_id AS seller_id, name AS seller_name FROM users WHERE user_id=? LIMIT 1');
+        $u->execute([$sellerId]);
+        $usr = $u->fetch();
+        if (!$usr) return null;
+        return [
+            'seller_id' => (int)$usr['seller_id'],
+            'shop_name' => ($usr['seller_name'] . ' Shop'),
+            'logo' => null,
+            'banner' => null,
+            'description' => '',
+            'shipping_policy' => null,
+            'return_policy' => null,
+            'seller_name' => $usr['seller_name'],
+        ];
+    }
+    return $row;
+}
+
+function get_store_rating(int $sellerId): array {
+    global $pdo;
+    $r = $pdo->prepare('SELECT COALESCE(AVG(rating),0) AS avg_rating, COUNT(*) AS total
+                        FROM store_reviews WHERE seller_id = ?');
+    $r->execute([$sellerId]);
+    $row = $r->fetch();
+    return [
+        'avg' => isset($row['avg_rating']) ? (float)$row['avg_rating'] : 0.0,
+        'cnt' => isset($row['total']) ? (int)$row['total'] : 0,
+    ];
+}
+
+function is_store_followed(int $buyerId, int $sellerId): bool {
+    global $pdo;
+    $s = $pdo->prepare('SELECT 1 FROM store_follows WHERE buyer_id=? AND seller_id=? LIMIT 1');
+    $s->execute([$buyerId, $sellerId]);
+    return (bool)$s->fetchColumn();
+}
+
+function count_store_followers(int $sellerId): int {
+    global $pdo;
+    $s = $pdo->prepare('SELECT COUNT(*) FROM store_follows WHERE seller_id=?');
+    $s->execute([$sellerId]);
+    return (int)$s->fetchColumn();
 }

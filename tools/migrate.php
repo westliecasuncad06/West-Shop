@@ -67,6 +67,18 @@ if ($mysqli->connect_errno) {
 }
 $mysqli->set_charset('utf8mb4');
 
+// When not doing a full reset, ensure the target database is selected up front
+if (!$doReset) {
+    if (!$mysqli->select_db(DB_NAME)) {
+        fwrite(STDERR, "Database '" . DB_NAME . "' not found or not accessible. Run with --reset to initialize.\n");
+        if ($isCli) {
+            exit(1);
+        } else {
+            die('Database not selected.');
+        }
+    }
+}
+
 function out($msg, $isCli) {
     if ($isCli) {
         echo $msg . "\n";

@@ -17,20 +17,55 @@ if (!$profile) {
     $profile = $sp->fetch();
 }
 
+// Ensure a corresponding row exists in `stores` for this seller (if table is present)
+try {
+  $chkStore = $pdo->prepare('SELECT store_id FROM stores WHERE seller_id=? LIMIT 1');
+  $chkStore->execute([$u['user_id']]);
+  $sid = $chkStore->fetchColumn();
+  if (!$sid) {
+    $insStore = $pdo->prepare('INSERT INTO stores (seller_id, store_name, logo, banner, description, shipping_policy, return_policy) VALUES (?,?,?,?,?,?,?)');
+    $insStore->execute([
+      $u['user_id'],
+      ($profile['shop_name'] ?: ($u['name'] . ' Shop')),
+      $profile['logo'] ?? null,
+      $profile['banner'] ?? null,
+      $profile['description'] ?? null,
+      $profile['shipping_policy'] ?? null,
+      $profile['return_policy'] ?? null
+    ]);
+  }
+} catch (Exception $e) { /* stores table may not exist yet; ignore */ }
+
 // Handle actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_verify()) { http_response_code(400); exit('Bad CSRF'); }
     $action = $_POST['action'] ?? '';
 
     if ($action === 'update_profile') {
-        $shop_name = trim($_POST['shop_name'] ?? '');
-        $description = trim($_POST['description'] ?? '');
-        if ($shop_name !== '') {
-            $up = $pdo->prepare('UPDATE seller_profiles SET shop_name=?, description=? WHERE seller_id=?');
-            $up->execute([$shop_name, $description, $u['user_id']]);
-            set_flash('success', 'Store profile updated');
-        }
-        redirect('seller/index.php');
+      $shop_name = trim($_POST['shop_name'] ?? '');
+      $description = trim($_POST['description'] ?? '');
+      $shipping_policy = trim($_POST['shipping_policy'] ?? '');
+      $return_policy = trim($_POST['return_policy'] ?? '');
+      if ($shop_name !== '') {
+        $up = $pdo->prepare('UPDATE seller_profiles SET shop_name=?, description=?, shipping_policy=?, return_policy=? WHERE seller_id=?');
+        $up->execute([$shop_name, $description, $shipping_policy, $return_policy, $u['user_id']]);
+        // Mirror into stores table if present (ignore failures silently)
+        try {
+          $chk = $pdo->prepare('SELECT store_id FROM stores WHERE seller_id=? LIMIT 1');
+          $chk->execute([$u['user_id']]);
+          $sid = $chk->fetchColumn();
+          if ($sid) {
+            $up2 = $pdo->prepare('UPDATE stores SET store_name=?, description=?, shipping_policy=?, return_policy=? WHERE seller_id=?');
+            $up2->execute([$shop_name, $description, $shipping_policy, $return_policy, $u['user_id']]);
+          } else {
+            // Create a store row if missing
+            $crt = $pdo->prepare('INSERT INTO stores (seller_id, store_name, description, shipping_policy, return_policy) VALUES (?,?,?,?,?)');
+            $crt->execute([$u['user_id'], $shop_name, $description, $shipping_policy, $return_policy]);
+          }
+        } catch (Exception $e) { /* noop */ }
+        set_flash('success', 'Store profile updated');
+      }
+      redirect('seller/index.php');
     }
 
     if ($action === 'upload_logo' || $action === 'upload_banner') {
@@ -51,6 +86,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $path = $uploadRel . '/' . $name;
                     $up = $pdo->prepare("UPDATE seller_profiles SET {$field}=? WHERE seller_id=?");
                     $up->execute([$path, $u['user_id']]);
+            // Mirror to stores table if exists
+            try {
+              $chk = $pdo->prepare('SELECT store_id FROM stores WHERE seller_id=? LIMIT 1');
+              $chk->execute([$u['user_id']]);
+              $existingStoreId = $chk->fetchColumn();
+              if ($existingStoreId) {
+                $up2 = $pdo->prepare("UPDATE stores SET {$field}=? WHERE seller_id=?");
+                $up2->execute([$path, $u['user_id']]);
+              } else {
+                // Create store row and set image
+                $crt = $pdo->prepare('INSERT INTO stores (seller_id, store_name, {$field}) VALUES (?,?,?)');
+                $crt->execute([$u['user_id'], ($profile['shop_name'] ?: ($u['name'].' Shop')), $path]);
+              }
+            } catch (Exception $e) { /* ignore */ }
                     set_flash('success', ucfirst($field) . ' updated');
                 } else {
                     set_flash('danger', 'Failed to save uploaded file');
@@ -85,13 +134,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $expires_at = trim($_POST['expires_at'] ?? '');
         $max_uses = (int)($_POST['max_uses'] ?? 0);
         if ($code !== '' && $value > 0) {
-            try {
-                $ins = $pdo->prepare('INSERT INTO coupons(code,type,value,expires_at,max_uses,created_by) VALUES (?,?,?,?,?,?)');
-                $ins->execute([$code, $type, $value, ($expires_at ?: null), $max_uses, $u['user_id']]);
-                set_flash('success', 'Coupon created');
-            } catch (Exception $e) {
-                set_flash('danger', 'Coupon code already exists');
-            }
+        // Resolve store id if possible (non-fatal if stores table missing)
+        $storeId = null;
+        try {
+          $storeCheck = $pdo->prepare('SELECT store_id FROM stores WHERE seller_id = ? LIMIT 1');
+          $storeCheck->execute([$u['user_id']]);
+          $storeId = $storeCheck->fetchColumn() ?: null;
+        } catch (Exception $e) { $storeId = null; }
+
+        // Detect coupons schema columns to keep compatibility
+        $hasStoreId = false; $hasShopId = false;
+        try {
+          $c1 = $pdo->query("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name='coupons' AND column_name='store_id'");
+          $hasStoreId = (bool)$c1->fetchColumn();
+          $c2 = $pdo->query("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name='coupons' AND column_name='shop_id'");
+          $hasShopId = (bool)$c2->fetchColumn();
+        } catch (Exception $e) { /* ignore, default false */ }
+
+        // Attempt to map to legacy shops if needed
+        $shopId = null;
+        if ($hasShopId && !$hasStoreId && $storeId === null) {
+          try {
+            $s = $pdo->prepare('SELECT shop_id FROM shops WHERE seller_id=? LIMIT 1');
+            $s->execute([$u['user_id']]);
+            $shopId = $s->fetchColumn() ?: null;
+          } catch (Exception $e) { $shopId = null; }
+        }
+
+        // Build INSERT based on available columns
+        $cols = ['code','type','value','expires_at','max_uses','created_by'];
+        $vals = [$code,$type,$value,($expires_at ?: null),$max_uses,$u['user_id']];
+        if ($hasStoreId) { $cols[] = 'store_id'; $vals[] = $storeId; }
+        elseif ($hasShopId) { $cols[] = 'shop_id'; $vals[] = $shopId; }
+
+        $placeholders = implode(',', array_fill(0, count($cols), '?'));
+        $sql = 'INSERT INTO coupons(' . implode(',', $cols) . ') VALUES (' . $placeholders . ')';
+
+        try {
+          $ins = $pdo->prepare($sql);
+          $ins->execute($vals);
+          set_flash('success', 'Coupon created');
+        } catch (Exception $e) {
+          // Attempt to detect duplicate code; otherwise generic
+          $msg = 'Failed to create coupon';
+          $em = $e->getMessage();
+          if (stripos($em, 'Duplicate') !== false || stripos($em, '1062') !== false) {
+            $msg = 'Coupon code already exists';
+          }
+          set_flash('danger', $msg);
+        }
         } else {
             set_flash('warning', 'Provide a valid code and value');
         }
@@ -102,6 +193,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // Quick stats
 $pid = $pdo->prepare('SELECT COUNT(*) FROM products WHERE seller_id = ?'); $pid->execute([$u['user_id']]); $prodCount = (int)$pid->fetchColumn();
 $oid = $pdo->prepare('SELECT COUNT(*) FROM order_items oi JOIN products p ON oi.product_id=p.product_id WHERE p.seller_id=?'); $oid->execute([$u['user_id']]); $soldCount = (int)$oid->fetchColumn();
+
+// Get seller's store_id and load coupons (fallback to created_by)
+$storeId = null;
+try {
+  $storeStmt = $pdo->prepare('SELECT store_id FROM stores WHERE seller_id = ? LIMIT 1');
+  $storeStmt->execute([$u['user_id']]);
+  $storeId = $storeStmt->fetchColumn() ?: null;
+} catch (Exception $e) { $storeId = null; }
+
+$coupons = [];
+try {
+  if ($storeId) {
+    $couponStmt = $pdo->prepare('SELECT * FROM coupons WHERE store_id = ? ORDER BY created_at DESC');
+    $couponStmt->execute([$storeId]);
+  } else {
+    $couponStmt = $pdo->prepare('SELECT * FROM coupons WHERE created_by = ? ORDER BY created_at DESC');
+    $couponStmt->execute([$u['user_id']]);
+  }
+  $coupons = $couponStmt->fetchAll();
+} catch (Exception $e) { $coupons = []; }
 
 // Search / filter inputs (GET)
 $q = trim($_GET['q'] ?? '');
@@ -166,6 +277,51 @@ include __DIR__ . '/../templates/header.php';
       <?php if(!empty($profile['description'])): ?><p class="mt-3 mb-0 text-muted"><?php echo e($profile['description']); ?></p><?php endif; ?>
     </div>
   </div>
+  
+  <?php if (count($coupons) > 0): 
+    // Filter for active/valid coupons only in preview
+    $activeCoupons = array_filter($coupons, function($c) {
+      $notExpired = !$c['expires_at'] || strtotime($c['expires_at']) >= time();
+      $notMaxed = $c['max_uses'] == 0 || $c['used_count'] < $c['max_uses'];
+      return $notExpired && $notMaxed;
+    });
+    if (count($activeCoupons) > 0):
+  ?>
+  <div class="card mb-3 p-3">
+    <h5 class="mb-3">🎟️ Active Coupons</h5>
+    <div class="row g-2">
+      <?php foreach ($activeCoupons as $coupon): ?>
+        <div class="col-md-4">
+          <div class="card bg-light border-success">
+            <div class="card-body p-3">
+              <div class="d-flex align-items-center justify-content-between mb-2">
+                <h6 class="mb-0 text-success"><?php echo e($coupon['code']); ?></h6>
+                <span class="badge bg-success">
+                  <?php if ($coupon['type'] === 'percent'): ?>
+                    <?php echo e($coupon['value']); ?>% OFF
+                  <?php else: ?>
+                    $<?php echo e($coupon['value']); ?> OFF
+                  <?php endif; ?>
+                </span>
+              </div>
+              <?php if ($coupon['expires_at']): ?>
+                <div class="small text-muted">
+                  Valid until: <?php echo e(date('M j, Y', strtotime($coupon['expires_at']))); ?>
+                </div>
+              <?php endif; ?>
+              <?php if ($coupon['max_uses'] > 0): ?>
+                <div class="small text-muted">
+                  <?php echo ($coupon['max_uses'] - $coupon['used_count']); ?> uses remaining
+                </div>
+              <?php endif; ?>
+            </div>
+          </div>
+        </div>
+      <?php endforeach; ?>
+    </div>
+  </div>
+  <?php endif; endif; ?>
+
   <div class="row g-3">
     <?php foreach(($previewProducts ?? []) as $p): ?>
       <div class="col-md-4">
@@ -230,6 +386,8 @@ include __DIR__ . '/../templates/header.php';
           <input type="hidden" name="action" value="update_profile">
           <div class="mb-2"><input class="form-control" name="shop_name" placeholder="Store name" value="<?php echo e($profile['shop_name']); ?>" required></div>
           <div class="mb-2"><textarea class="form-control" name="description" placeholder="Short description" rows="3"><?php echo e($profile['description'] ?? ''); ?></textarea></div>
+          <div class="mb-2"><textarea class="form-control" name="shipping_policy" placeholder="Shipping policy" rows="3"><?php echo e($profile['shipping_policy'] ?? ''); ?></textarea></div>
+          <div class="mb-3"><textarea class="form-control" name="return_policy" placeholder="Return policy" rows="3"><?php echo e($profile['return_policy'] ?? ''); ?></textarea></div>
           <button class="btn btn-primary w-100">Save</button>
         </form>
       </div>
@@ -313,7 +471,7 @@ include __DIR__ . '/../templates/header.php';
     </div>
 
     <div class="col-lg-3">
-      <div class="card p-3">
+      <div class="card p-3 mb-3">
         <h6 class="mb-2">Add Coupon</h6>
         <form method="post" class="small">
           <?php echo csrf_field(); ?>
@@ -332,6 +490,53 @@ include __DIR__ . '/../templates/header.php';
           <div class="mb-3"><input type="number" name="max_uses" class="form-control" placeholder="Max uses (0 = unlimited)" value="0"></div>
           <button class="btn btn-primary w-100">Create</button>
         </form>
+      </div>
+
+      <div class="card p-3">
+        <h6 class="mb-2">Store Coupons</h6>
+        <?php if (count($coupons) > 0): ?>
+          <div class="list-group list-group-flush small">
+            <?php foreach ($coupons as $coupon): 
+              $isExpired = $coupon['expires_at'] && strtotime($coupon['expires_at']) < time();
+              $isMaxed = $coupon['max_uses'] > 0 && $coupon['used_count'] >= $coupon['max_uses'];
+            ?>
+              <div class="list-group-item px-0 py-2">
+                <div class="d-flex justify-content-between align-items-start">
+                  <div class="flex-grow-1">
+                    <strong><?php echo e($coupon['code']); ?></strong>
+                    <div class="text-muted" style="font-size: 0.85em;">
+                      <?php echo e($coupon['type']); ?> - 
+                      <?php if ($coupon['type'] === 'percent'): ?>
+                        <?php echo e($coupon['value']); ?>%
+                      <?php else: ?>
+                        $<?php echo e($coupon['value']); ?>
+                      <?php endif; ?>
+                    </div>
+                    <div class="text-muted" style="font-size: 0.75em;">
+                      <?php if ($coupon['expires_at']): ?>
+                        Expires: <?php echo e(date('M j, Y', strtotime($coupon['expires_at']))); ?>
+                        <?php if ($isExpired): ?><span class="text-danger">(Expired)</span><?php endif; ?>
+                      <?php else: ?>
+                        No expiration
+                      <?php endif; ?>
+                    </div>
+                    <div class="text-muted" style="font-size: 0.75em;">
+                      Used: <?php echo (int)$coupon['used_count']; ?>
+                      <?php if ($coupon['max_uses'] > 0): ?>
+                        / <?php echo (int)$coupon['max_uses']; ?>
+                        <?php if ($isMaxed): ?><span class="text-warning">(Max reached)</span><?php endif; ?>
+                      <?php else: ?>
+                        (Unlimited)
+                      <?php endif; ?>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            <?php endforeach; ?>
+          </div>
+        <?php else: ?>
+          <p class="text-muted small mb-0">No coupons yet. Create one above!</p>
+        <?php endif; ?>
       </div>
     </div>
   </div>

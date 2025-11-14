@@ -44,7 +44,7 @@ $results = search_products($q ?: null, $cat ?: null, $sub ?: null, 60);
 <?php foreach($results as $p): ?>
   <div class="col-6 col-md-4 col-lg-3">
     <div class="card product-card h-100">
-      <img src="<?php echo e($p['image'] ? base_url('assets/images/'.$p['image']) : 'https://via.placeholder.com/400x300?text=Product'); ?>" class="w-100" alt="">
+      <img src="<?php echo e(product_image_src($p['image'] ?? null)); ?>" class="w-100" alt="">
       <div class="p-3">
         <div class="fw-semibold"><?php echo e($p['name']); ?></div>
         <div class="text-muted small mb-2"><?php echo e($p['category_name'] ?? ''); ?></div>
@@ -53,6 +53,7 @@ $results = search_products($q ?: null, $cat ?: null, $sub ?: null, 60);
           <a href="<?php echo e(base_url('public/product.php?id='.(int)$p['product_id'])); ?>" class="btn btn-sm btn-outline-primary">View</a>
         </div>
       </div>
+      <a href="<?php echo e(base_url('public/product.php?id='.(int)$p['product_id'])); ?>" class="stretched-link" aria-label="Open product"></a>
     </div>
   </div>
 <?php endforeach; ?>

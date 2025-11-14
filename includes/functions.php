@@ -208,9 +208,14 @@ function get_seller_profile(int $sellerId): ?array {
 
 function get_store_rating(int $sellerId): array {
     global $pdo;
-    $r = $pdo->prepare('SELECT COALESCE(AVG(rating),0) AS avg_rating, COUNT(*) AS total
-                        FROM store_reviews WHERE seller_id = ?');
-    $r->execute([$sellerId]);
+    $col = store_reviews_id_column();
+    $ownerId = store_reviews_owner_value($sellerId);
+    if (!$ownerId) {
+        return ['avg' => 0.0, 'cnt' => 0];
+    }
+    $sql = 'SELECT COALESCE(AVG(rating),0) AS avg_rating, COUNT(*) AS total FROM store_reviews WHERE ' . $col . ' = ?';
+    $r = $pdo->prepare($sql);
+    $r->execute([$ownerId]);
     $row = $r->fetch();
     return [
         'avg' => isset($row['avg_rating']) ? (float)$row['avg_rating'] : 0.0,
@@ -230,4 +235,79 @@ function count_store_followers(int $sellerId): int {
     $s = $pdo->prepare('SELECT COUNT(*) FROM store_follows WHERE seller_id=?');
     $s->execute([$sellerId]);
     return (int)$s->fetchColumn();
+}
+
+function store_reviews_has_updated_at(): bool {
+    static $has = null;
+    if ($has !== null) {
+        return $has;
+    }
+    global $pdo;
+    try {
+        $q = $pdo->query("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name='store_reviews' AND column_name='updated_at' LIMIT 1");
+        $has = (bool)$q->fetchColumn();
+    } catch (Exception $e) {
+        $has = false;
+    }
+    return $has;
+}
+
+// Generic column presence check for store_reviews
+function store_reviews_has_column(string $name): bool {
+    static $cache = [];
+    if (array_key_exists($name, $cache)) return $cache[$name];
+    global $pdo;
+    try {
+        $stmt = $pdo->prepare("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name='store_reviews' AND column_name = ? LIMIT 1");
+        $stmt->execute([$name]);
+        $cache[$name] = (bool)$stmt->fetchColumn();
+    } catch (Exception $e) {
+        $cache[$name] = false;
+    }
+    return $cache[$name];
+}
+
+// Detect whether store reviews reference a store record or the legacy seller id
+function store_reviews_id_column(): string {
+    static $col = null;
+    if ($col !== null) return $col;
+    global $pdo;
+    try {
+        $q = $pdo->query("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name='store_reviews' AND column_name='store_id' LIMIT 1");
+        $col = $q->fetchColumn() ? 'store_id' : 'seller_id';
+    } catch (Exception $e) {
+        $col = 'seller_id';
+    }
+    return $col;
+}
+
+// Map a seller_id to the correct owner id for store_reviews (store_id or seller_id)
+function store_reviews_owner_value(int $sellerId): ?int {
+    $col = store_reviews_id_column();
+    if ($col === 'seller_id') {
+        return $sellerId;
+    }
+    // When using stores, resolve the seller's store_id
+    global $pdo;
+    try {
+        $s = $pdo->prepare('SELECT store_id FROM stores WHERE seller_id = ? LIMIT 1');
+        $s->execute([$sellerId]);
+        $sid = $s->fetchColumn();
+        return $sid ? (int)$sid : null;
+    } catch (Exception $e) {
+        return null;
+    }
+}
+
+// Always resolve store_id for a given seller when available
+function get_store_id_for_seller(int $sellerId): ?int {
+    global $pdo;
+    try {
+        $s = $pdo->prepare('SELECT store_id FROM stores WHERE seller_id = ? LIMIT 1');
+        $s->execute([$sellerId]);
+        $sid = $s->fetchColumn();
+        return $sid ? (int)$sid : null;
+    } catch (Exception $e) {
+        return null;
+    }
 }

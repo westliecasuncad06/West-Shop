@@ -19,29 +19,40 @@ $sellers = $pdo->query("SELECT user_id, name, email, status, created_at FROM use
 
 include __DIR__ . '/../templates/header.php';
 ?>
-<h4 class="mb-3">Sellers</h4>
-<div class="table-responsive">
-<table class="table align-middle">
-  <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead>
-  <tbody>
-    <?php foreach($sellers as $s): ?>
-      <tr>
-        <td><?php echo e($s['name']); ?></td>
-        <td><?php echo e($s['email']); ?></td>
-        <td><?php echo e($s['status']); ?></td>
-        <td><?php echo e($s['created_at']); ?></td>
-        <td>
-          <form method="post" class="d-inline">
-            <?php echo csrf_field(); ?>
-            <input type="hidden" name="user_id" value="<?php echo (int)$s['user_id']; ?>">
-            <button name="action" value="approved" class="btn btn-sm btn-success">Approve</button>
-            <button name="action" value="rejected" class="btn btn-sm btn-outline-danger">Reject</button>
-          </form>
-        </td>
-      </tr>
-    <?php endforeach; ?>
-    <?php if(!$sellers): ?><tr><td colspan="5" class="text-center text-muted">No sellers yet.</td></tr><?php endif; ?>
-  </tbody>
-</table>
-</div>
+<section class="section-shell">
+  <div class="section-heading">
+    <div>
+      <p class="section-heading__eyebrow mb-1">Community</p>
+      <h1 class="section-heading__title mb-0">Seller directory</h1>
+      <p class="page-subtitle mt-2">Approve new partners, monitor statuses, and keep communication crisp.</p>
+    </div>
+  </div>
+  <div class="surface-card p-0">
+    <div class="table-responsive">
+      <table class="table table-modern align-middle mb-0">
+        <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Joined</th><th class="text-end">Actions</th></tr></thead>
+        <tbody>
+          <?php foreach($sellers as $s): ?>
+            <tr>
+              <td class="fw-semibold"><?php echo e($s['name']); ?></td>
+              <td><?php echo e($s['email']); ?></td>
+              <td><span class="badge-soft <?php echo $s['status']==='approved' ? 'badge-soft--success' : 'badge-soft--warning'; ?>"><?php echo e($s['status']); ?></span></td>
+              <td><?php echo date('M d, Y', strtotime($s['created_at'])); ?></td>
+              <td class="text-end">
+                <form method="post" class="d-inline-flex gap-2">
+                  <?php echo csrf_field(); ?>
+                  <input type="hidden" name="user_id" value="<?php echo (int)$s['user_id']; ?>">
+                  <button name="action" value="approved" class="btn btn-sm btn-success">Approve</button>
+                  <button name="action" value="rejected" class="btn btn-sm btn-outline-danger">Reject</button>
+                </form>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+          <?php if(!$sellers): ?><tr><td colspan="5" class="text-center text-muted">No sellers yet.</td></tr><?php endif; ?>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
 <?php include __DIR__ . '/../templates/footer.php'; ?>

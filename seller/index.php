@@ -113,6 +113,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('seller/index.php');
     }
 
+      if ($action === 'create_product') {
+        $name = trim($_POST['name'] ?? '');
+        $price = (float)($_POST['price'] ?? 0);
+        $stock = (int)($_POST['stock'] ?? 0);
+        $subcat = (int)($_POST['subcategory_id'] ?? 0);
+        $cat = $subcat ?: (int)($_POST['category_id'] ?? 0);
+        $description = trim($_POST['description'] ?? '');
+
+        $imagePath = null;
+        $uploadRel = 'assets/images/products';
+        $uploadDir = __DIR__ . '/../' . $uploadRel;
+        if (!is_dir($uploadDir)) { @mkdir($uploadDir, 0755, true); }
+
+        if (!empty($_FILES['image']) && isset($_FILES['image']['error']) && $_FILES['image']['error'] === UPLOAD_ERR_OK) {
+          $f = $_FILES['image'];
+          $finfo = new finfo(FILEINFO_MIME_TYPE);
+          $mime = $finfo->file($f['tmp_name']);
+          $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp'];
+          if (isset($allowed[$mime])) {
+            $ext = $allowed[$mime];
+            $fname = time() . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
+            $dest = $uploadDir . DIRECTORY_SEPARATOR . $fname;
+            if (move_uploaded_file($f['tmp_name'], $dest)) {
+              $imagePath = $uploadRel . '/' . $fname;
+            }
+          }
+        }
+        if (!$imagePath) {
+          $imgUrl = trim($_POST['image_url'] ?? '');
+          if ($imgUrl && filter_var($imgUrl, FILTER_VALIDATE_URL)) { $imagePath = $imgUrl; }
+        }
+        if (!$imagePath) {
+          $gdrive = trim($_POST['gdrive_url'] ?? '');
+          if ($gdrive && filter_var($gdrive, FILTER_VALIDATE_URL)) { $imagePath = $gdrive; }
+        }
+
+        if ($name !== '') {
+          $stmt = $pdo->prepare('INSERT INTO products(seller_id, category_id, name, description, price, stock, image, status) VALUES (?,?,?,?,?,?,?,"active")');
+          $stmt->execute([$u['user_id'], $cat ?: null, $name, $description, $price, $stock, $imagePath]);
+          set_flash('success', 'Product added');
+        } else {
+          set_flash('warning', 'Product name is required');
+        }
+        redirect('seller/index.php#inventory');
+      }
+
+      if ($action === 'delete_product') {
+        $pid = (int)($_POST['product_id'] ?? 0);
+        if ($pid) {
+          $stmt = $pdo->prepare('DELETE FROM products WHERE product_id=? AND seller_id=?');
+          $stmt->execute([$pid, $u['user_id']]);
+          set_flash('success', 'Product deleted');
+        }
+        redirect('seller/index.php#inventory');
+      }
+
     if ($action === 'update_product') {
         $pid = (int)($_POST['product_id'] ?? 0);
         $name = trim($_POST['name'] ?? '');
@@ -224,6 +280,7 @@ $topCatsStmt = $pdo->prepare('SELECT * FROM categories WHERE parent_id IS NULL O
 $topCatsStmt->execute();
 $topCategories = $topCatsStmt->fetchAll();
 $allCats = $pdo->query('SELECT * FROM categories ORDER BY name')->fetchAll();
+$subCategories = array_values(array_filter($allCats, function($c){ return !is_null($c['parent_id']); }));
 
 // Load products with optional search/category filters (for seller dashboard)
 $params = [$u['user_id']];
@@ -249,295 +306,479 @@ $products = $pp->fetchAll();
 // Detect buyer preview
 $isPreview = isset($_GET['preview']) && $_GET['preview'] == '1';
 
-// For preview view show latest 6 active products (ignore dashboard filters)
-if ($isPreview) {
-  $pv = $pdo->prepare("SELECT * FROM products WHERE seller_id=? AND status='active' ORDER BY created_at DESC LIMIT 6");
-  $pv->execute([$u['user_id']]);
-  $previewProducts = $pv->fetchAll();
-}
-
 include __DIR__ . '/../templates/header.php';
 ?>
 
 <?php if ($isPreview): ?>
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <h4 class="mb-0">Store Preview</h4>
-    <a class="btn btn-outline-secondary" href="<?php echo e(base_url('seller/index.php')); ?>">Exit Preview</a>
-  </div>
-  <div class="card mb-3 p-0 overflow-hidden">
-    <img src="<?php echo e($profile['banner'] ? base_url($profile['banner']) : base_url('assets/images/products/placeholder.png')); ?>" class="w-100" style="height:240px;object-fit:cover">
-    <div class="p-3 bg-white">
-      <div class="d-flex align-items-center">
-        <img src="<?php echo e($profile['logo'] ? base_url($profile['logo']) : base_url('assets/images/products/placeholder.png')); ?>" width="84" height="84" class="rounded-circle me-3" style="object-fit:cover">
-        <div>
-          <h4 class="mb-0"><?php echo e($profile['shop_name']); ?></h4>
-          <div class="small text-muted">by <?php echo e($u['name']); ?></div>
-        </div>
-      </div>
-      <?php if(!empty($profile['description'])): ?><p class="mt-3 mb-0 text-muted"><?php echo e($profile['description']); ?></p><?php endif; ?>
-    </div>
-  </div>
-  
-  <?php if (count($coupons) > 0): 
-    // Filter for active/valid coupons only in preview
-    $activeCoupons = array_filter($coupons, function($c) {
-      $notExpired = !$c['expires_at'] || strtotime($c['expires_at']) >= time();
-      $notMaxed = $c['max_uses'] == 0 || $c['used_count'] < $c['max_uses'];
-      return $notExpired && $notMaxed;
-    });
-    if (count($activeCoupons) > 0):
+  <?php
+    $sellerIdForPreview = (int)$u['user_id'];
+    $store = get_seller_profile($sellerIdForPreview);
+    if (!$store) {
+      $store = [
+        'seller_id' => $sellerIdForPreview,
+        'seller_name' => $u['name'],
+        'shop_name' => $profile['shop_name'] ?? ($u['name'] . ' Shop'),
+        'description' => $profile['description'] ?? '',
+        'shipping_policy' => $profile['shipping_policy'] ?? '',
+        'return_policy' => $profile['return_policy'] ?? '',
+        'logo' => $profile['logo'] ?? null,
+        'banner' => $profile['banner'] ?? null,
+      ];
+    }
+
+    $rating = get_store_rating($sellerIdForPreview);
+    $followers = count_store_followers($sellerIdForPreview);
+    $isBuyer = false; // Seller preview should not expose buyer actions
+    $isFollowing = false;
+
+    $pstmt = $pdo->prepare('SELECT * FROM products WHERE seller_id = ? AND status = "active" ORDER BY created_at DESC');
+    $pstmt->execute([$sellerIdForPreview]);
+    $products = $pstmt->fetchAll();
+
+    // Copy coupon logic from buyer storefront
+    $storeId = null;
+    try {
+      $storeStmt = $pdo->prepare('SELECT store_id FROM stores WHERE seller_id = ? LIMIT 1');
+      $storeStmt->execute([$sellerIdForPreview]);
+      $storeId = $storeStmt->fetchColumn();
+    } catch (Exception $e) {
+      $storeId = null;
+    }
+
+    $activeCoupons = [];
+    try {
+      if ($storeId) {
+        $couponStmt = $pdo->prepare('SELECT * FROM coupons WHERE store_id = ? ORDER BY created_at DESC');
+        $couponStmt->execute([$storeId]);
+        $allCoupons = $couponStmt->fetchAll();
+      } else {
+        $couponStmt = $pdo->prepare('SELECT * FROM coupons WHERE created_by = ? ORDER BY created_at DESC');
+        $couponStmt->execute([$sellerIdForPreview]);
+        $allCoupons = $couponStmt->fetchAll();
+      }
+
+      $activeCoupons = array_filter($allCoupons, function($c) {
+        $notExpired = !$c['expires_at'] || strtotime($c['expires_at']) >= time();
+        $notMaxed = ($c['max_uses'] ?? 0) == 0 || ($c['used_count'] ?? 0) < $c['max_uses'];
+        return $notExpired && $notMaxed;
+      });
+    } catch (Exception $e) {
+      $activeCoupons = [];
+    }
+
+    $storeViewMode = 'seller_preview';
+    $storeActionUrl = base_url('seller/index.php?preview=1');
+    $previewExitUrl = base_url('seller/index.php');
+
+    include __DIR__ . '/partials/storefront_view.php';
   ?>
-  <div class="card mb-3 p-3">
-    <h5 class="mb-3">🎟️ Active Coupons</h5>
-    <div class="row g-2">
-      <?php foreach ($activeCoupons as $coupon): ?>
-        <div class="col-md-4">
-          <div class="card bg-light border-success">
-            <div class="card-body p-3">
-              <div class="d-flex align-items-center justify-content-between mb-2">
-                <h6 class="mb-0 text-success"><?php echo e($coupon['code']); ?></h6>
-                <span class="badge bg-success">
-                  <?php if ($coupon['type'] === 'percent'): ?>
-                    <?php echo e($coupon['value']); ?>% OFF
-                  <?php else: ?>
-                    $<?php echo e($coupon['value']); ?> OFF
-                  <?php endif; ?>
-                </span>
-              </div>
-              <?php if ($coupon['expires_at']): ?>
-                <div class="small text-muted">
-                  Valid until: <?php echo e(date('M j, Y', strtotime($coupon['expires_at']))); ?>
-                </div>
-              <?php endif; ?>
-              <?php if ($coupon['max_uses'] > 0): ?>
-                <div class="small text-muted">
-                  <?php echo ($coupon['max_uses'] - $coupon['used_count']); ?> uses remaining
-                </div>
-              <?php endif; ?>
-            </div>
-          </div>
-        </div>
-      <?php endforeach; ?>
-    </div>
-  </div>
-  <?php endif; endif; ?>
-
-  <div class="row g-3">
-    <?php foreach(($previewProducts ?? []) as $p): ?>
-      <div class="col-md-4">
-        <div class="card h-100">
-          <img src="<?php echo e($p['image'] && (strpos($p['image'],'http') === 0) ? $p['image'] : ($p['image'] ? base_url($p['image']) : base_url('assets/images/products/placeholder.png'))); ?>" class="w-100" style="height:180px;object-fit:cover">
-          <div class="card-body">
-            <h6 class="mb-1"><?php echo e($p['name']); ?></h6>
-            <div class="text-muted small">$<?php echo number_format((float)$p['price'],2); ?></div>
-          </div>
-        </div>
-      </div>
-    <?php endforeach; ?>
-    <?php if(!$products): ?><div class="col-12 text-center text-muted">No products yet.</div><?php endif; ?>
-  </div>
 <?php else: ?>
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <h4 class="mb-0">Seller Dashboard</h4>
-    <a class="btn btn-outline-secondary" href="<?php echo e(base_url('seller/index.php?preview=1')); ?>">Buyer View</a>
-  </div>
-
-  <div class="row g-3">
-    <div class="col-md-3"><div class="card p-4"><div class="text-muted">Products</div><div class="fs-3 fw-semibold"><?php echo $prodCount; ?></div></div></div>
-    <div class="col-md-3"><div class="card p-4"><div class="text-muted">Items Sold</div><div class="fs-3 fw-semibold"><?php echo $soldCount; ?></div></div></div>
-    <div class="col-md-3"><a class="text-decoration-none" href="<?php echo e(base_url('seller/products.php')); ?>"><div class="card p-4"><div class="fs-1">➕</div><div class="fw-semibold">Manage Products</div></div></a></div>
-    <div class="col-md-3"><a class="text-decoration-none" href="<?php echo e(base_url('seller/chat_admin.php')); ?>"><div class="card p-4"><div class="fs-1">💬</div><div class="fw-semibold">Support Chat</div></div></a></div>
-  </div>
-
-  <div class="row g-3 mt-1">
-    <div class="col-lg-4">
-      <div class="card p-3">
-        <h6 class="mb-3">Store Profile</h6>
-        <div class="mb-3">
-          <div class="ratio ratio-16x9 mb-2" style="background:#f6f6f6;border:1px dashed #ddd;border-radius:6px;overflow:hidden;">
-            <?php if($profile['banner']): ?>
-              <img src="<?php echo e(base_url($profile['banner'])); ?>" style="object-fit:cover;">
-            <?php else: ?>
-              <div class="d-flex align-items-center justify-content-center text-muted">No banner yet</div>
-            <?php endif; ?>
-          </div>
-          <form method="post" enctype="multipart/form-data" class="d-flex gap-2">
-            <?php echo csrf_field(); ?>
-            <input type="hidden" name="action" value="upload_banner">
-            <input type="file" name="image" class="form-control" accept="image/*" required>
-            <button class="btn btn-outline-primary">Upload</button>
-          </form>
-        </div>
-        <div class="mb-3 d-flex align-items-center">
-          <div style="width:76px;height:76px;border-radius:50%;overflow:hidden;background:#f0f0f0;border:1px dashed #ddd;" class="me-2">
-            <?php if($profile['logo']): ?>
-              <img src="<?php echo e(base_url($profile['logo'])); ?>" style="width:100%;height:100%;object-fit:cover;">
-            <?php endif; ?>
-          </div>
-          <form method="post" enctype="multipart/form-data" class="flex-grow-1 d-flex gap-2">
-            <?php echo csrf_field(); ?>
-            <input type="hidden" name="action" value="upload_logo">
-            <input type="file" name="image" class="form-control" accept="image/*" required>
-            <button class="btn btn-outline-primary">Upload</button>
-          </form>
-        </div>
-        <form method="post">
-          <?php echo csrf_field(); ?>
-          <input type="hidden" name="action" value="update_profile">
-          <div class="mb-2"><input class="form-control" name="shop_name" placeholder="Store name" value="<?php echo e($profile['shop_name']); ?>" required></div>
-          <div class="mb-2"><textarea class="form-control" name="description" placeholder="Short description" rows="3"><?php echo e($profile['description'] ?? ''); ?></textarea></div>
-          <div class="mb-2"><textarea class="form-control" name="shipping_policy" placeholder="Shipping policy" rows="3"><?php echo e($profile['shipping_policy'] ?? ''); ?></textarea></div>
-          <div class="mb-3"><textarea class="form-control" name="return_policy" placeholder="Return policy" rows="3"><?php echo e($profile['return_policy'] ?? ''); ?></textarea></div>
-          <button class="btn btn-primary w-100">Save</button>
-        </form>
-      </div>
-    </div>
-
-    <div class="col-lg-5">
-      <div class="card p-3">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <h6 class="mb-0">My Products</h6>
-          <a href="<?php echo e(base_url('seller/products.php')); ?>" class="small">Open full manager</a>
-        </div>
-
-        <form method="get" class="row g-2 mb-2">
-          <div class="col-md-6">
-            <input type="search" name="q" class="form-control" placeholder="Search products" value="<?php echo e($q); ?>">
-          </div>
-          <div class="col-md-3">
-            <select id="top_cat" name="top_cat" class="form-select">
-              <option value="">All categories</option>
-              <?php foreach($topCategories as $tc): ?>
-                <option value="<?php echo (int)$tc['category_id']; ?>" <?php echo ($top_cat==(int)$tc['category_id']?'selected':''); ?>><?php echo e($tc['name']); ?></option>
-              <?php endforeach; ?>
-            </select>
-          </div>
-          <div class="col-md-3">
-            <select id="sub_cat" name="sub_cat" class="form-select">
-              <option value="">All subcategories</option>
-              <?php if($top_cat):
-                $subStmt = $pdo->prepare('SELECT * FROM categories WHERE parent_id = ? ORDER BY name');
-                $subStmt->execute([$top_cat]);
-                $subList = $subStmt->fetchAll();
-                foreach($subList as $sc): ?>
-                  <option value="<?php echo (int)$sc['category_id']; ?>" <?php echo ($sub_cat==(int)$sc['category_id']?'selected':''); ?>><?php echo e($sc['name']); ?></option>
-                <?php endforeach; endif; ?>
-            </select>
-          </div>
-        </form>
-
-        <div class="table-responsive">
-          <table class="table align-middle">
-            <thead><tr><th>Item</th><th>Price</th><th>Stock</th><th>Status</th><th></th></tr></thead>
-            <tbody>
-              <?php foreach($products as $p): ?>
-                <tr>
-                  <td class="d-flex align-items-center" style="gap:.5rem;">
-                    <img src="<?php echo e($p['image'] && (strpos($p['image'],'http') === 0) ? $p['image'] : ($p['image'] ? base_url($p['image']) : base_url('assets/images/products/placeholder.png'))); ?>" width="44" height="44" style="object-fit:cover;border-radius:6px;">
-                    <span><?php echo e($p['name']); ?></span>
-                  </td>
-                  <td>$<?php echo number_format((float)$p['price'],2); ?></td>
-                  <td><?php echo (int)$p['stock']; ?></td>
-                  <td><span class="badge bg-<?php echo ($p['status']==='active'?'success':'secondary'); ?>"><?php echo e($p['status']); ?></span></td>
-                  <td>
-                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#edit_<?php echo (int)$p['product_id']; ?>">Edit</button>
-                  </td>
-                </tr>
-                <tr class="collapse" id="edit_<?php echo (int)$p['product_id']; ?>">
-                  <td colspan="5">
-                    <form method="post" class="row g-2">
-                      <?php echo csrf_field(); ?>
-                      <input type="hidden" name="action" value="update_product">
-                      <input type="hidden" name="product_id" value="<?php echo (int)$p['product_id']; ?>">
-                      <div class="col-md-5"><input class="form-control" name="name" value="<?php echo e($p['name']); ?>" required></div>
-                      <div class="col-md-2"><input type="number" step="0.01" class="form-control" name="price" value="<?php echo e($p['price']); ?>" required></div>
-                      <div class="col-md-2"><input type="number" class="form-control" name="stock" value="<?php echo (int)$p['stock']; ?>" required></div>
-                      <div class="col-md-2">
-                        <select class="form-select" name="status">
-                          <option value="active" <?php echo ($p['status']==='active'?'selected':''); ?>>Active</option>
-                          <option value="inactive" <?php echo ($p['status']==='inactive'?'selected':''); ?>>Inactive</option>
-                        </select>
-                      </div>
-                      <div class="col-md-1 d-grid"><button class="btn btn-primary">Save</button></div>
-                    </form>
-                  </td>
-                </tr>
-              <?php endforeach; ?>
-              <?php if(!$products): ?><tr><td colspan="5" class="text-center text-muted">No products yet.</td></tr><?php endif; ?>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <div class="col-lg-3">
-      <div class="card p-3 mb-3">
-        <h6 class="mb-2">Add Coupon</h6>
-        <form method="post" class="small">
-          <?php echo csrf_field(); ?>
-          <input type="hidden" name="action" value="add_coupon">
-          <div class="mb-2"><input class="form-control" name="code" placeholder="CODE2025" required></div>
-          <div class="mb-2">
-            <div class="input-group">
-              <select name="type" class="form-select" style="max-width:45%">
-                <option value="fixed">Fixed</option>
-                <option value="percent">Percent</option>
-              </select>
-              <input type="number" step="0.01" name="value" class="form-control" placeholder="Value" required>
+  <div class="seller-shell">
+    <section class="seller-hero card border-0 p-4 p-lg-5">
+      <div class="row align-items-center g-4">
+        <div class="col-lg-7">
+          <div class="d-flex align-items-center gap-3 mb-3">
+            <div class="hero-icon shadow-sm">🏪</div>
+            <div>
+              <p class="text-muted mb-1 small">Welcome back, <?php echo e($u['name']); ?></p>
+              <h2 class="mb-0"><?php echo e($profile['shop_name'] ?: 'Your Storefront'); ?></h2>
             </div>
           </div>
-          <div class="mb-2"><input type="datetime-local" name="expires_at" class="form-control"></div>
-          <div class="mb-3"><input type="number" name="max_uses" class="form-control" placeholder="Max uses (0 = unlimited)" value="0"></div>
-          <button class="btn btn-primary w-100">Create</button>
-        </form>
+          <p class="text-muted mb-4">
+            <?php echo e($profile['description'] ?: 'Add a short store story so buyers instantly get your vibe.'); ?>
+          </p>
+          <div class="d-flex flex-wrap gap-2">
+            <a class="pill-button pill-button--mint" href="<?php echo e(base_url('seller/index.php?preview=1')); ?>">Buyer View</a>
+            <a class="pill-button pill-button--ghost" href="<?php echo e(base_url('seller/products.php')); ?>">Manage Products</a>
+          </div>
+        </div>
+        <div class="col-lg-5">
+          <div class="hero-metrics">
+            <div class="hero-stat-card">
+              <span class="hero-stat-label">Products live</span>
+              <strong class="display-6 fs-2"><?php echo $prodCount; ?></strong>
+            </div>
+            <div class="hero-stat-card">
+              <span class="hero-stat-label">Items sold</span>
+              <strong class="display-6 fs-2"><?php echo $soldCount; ?></strong>
+            </div>
+            <div class="hero-stat-card">
+              <span class="hero-stat-label">Last updated</span>
+              <strong class="fs-5">Today</strong>
+            </div>
+          </div>
+        </div>
       </div>
+    </section>
 
-      <div class="card p-3">
-        <h6 class="mb-2">Store Coupons</h6>
-        <?php if (count($coupons) > 0): ?>
-          <div class="list-group list-group-flush small">
-            <?php foreach ($coupons as $coupon): 
-              $isExpired = $coupon['expires_at'] && strtotime($coupon['expires_at']) < time();
-              $isMaxed = $coupon['max_uses'] > 0 && $coupon['used_count'] >= $coupon['max_uses'];
-            ?>
-              <div class="list-group-item px-0 py-2">
-                <div class="d-flex justify-content-between align-items-start">
-                  <div class="flex-grow-1">
-                    <strong><?php echo e($coupon['code']); ?></strong>
-                    <div class="text-muted" style="font-size: 0.85em;">
-                      <?php echo e($coupon['type']); ?> - 
-                      <?php if ($coupon['type'] === 'percent'): ?>
-                        <?php echo e($coupon['value']); ?>%
-                      <?php else: ?>
-                        $<?php echo e($coupon['value']); ?>
-                      <?php endif; ?>
-                    </div>
-                    <div class="text-muted" style="font-size: 0.75em;">
-                      <?php if ($coupon['expires_at']): ?>
-                        Expires: <?php echo e(date('M j, Y', strtotime($coupon['expires_at']))); ?>
-                        <?php if ($isExpired): ?><span class="text-danger">(Expired)</span><?php endif; ?>
-                      <?php else: ?>
-                        No expiration
-                      <?php endif; ?>
-                    </div>
-                    <div class="text-muted" style="font-size: 0.75em;">
-                      Used: <?php echo (int)$coupon['used_count']; ?>
-                      <?php if ($coupon['max_uses'] > 0): ?>
-                        / <?php echo (int)$coupon['max_uses']; ?>
-                        <?php if ($isMaxed): ?><span class="text-warning">(Max reached)</span><?php endif; ?>
-                      <?php else: ?>
-                        (Unlimited)
-                      <?php endif; ?>
-                    </div>
+    <div class="seller-stats-grid">
+      <a class="seller-stat-card" href="<?php echo e(base_url('seller/products.php')); ?>">
+        <span class="seller-stat-icon">📦</span>
+        <div>
+          <p class="seller-stat-label mb-1">Catalog health</p>
+          <strong class="seller-stat-value"><?php echo $prodCount; ?> items listed</strong>
+          <span class="text-muted small">Review stock & pricing</span>
+        </div>
+      </a>
+      <div class="seller-stat-card">
+        <span class="seller-stat-icon">💰</span>
+        <div>
+          <p class="seller-stat-label mb-1">Order momentum</p>
+          <strong class="seller-stat-value"><?php echo $soldCount; ?> orders fulfilled</strong>
+          <span class="text-muted small">Keep products active</span>
+        </div>
+      </div>
+      <a class="seller-stat-card" href="<?php echo e(base_url('seller/chat.php')); ?>">
+        <span class="seller-stat-icon">📨</span>
+        <div>
+          <p class="seller-stat-label mb-1">Buyer inbox</p>
+          <strong class="seller-stat-value">Reply faster</strong>
+          <span class="text-muted small">Open messages</span>
+        </div>
+      </a>
+      <a class="seller-stat-card" href="<?php echo e(base_url('seller/chat_admin.php')); ?>">
+        <span class="seller-stat-icon">🆘</span>
+        <div>
+          <p class="seller-stat-label mb-1">Need help?</p>
+          <strong class="seller-stat-value">Support chat</strong>
+          <span class="text-muted small">Talk to the team</span>
+        </div>
+      </a>
+    </div>
+
+    <div class="seller-content-grid">
+      <section class="seller-stack">
+        <div class="card p-4 store-profile-card">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+              <p class="section-label mb-1">Your brand kit</p>
+              <h5 class="mb-0">Store Profile</h5>
+            </div>
+            <span class="badge-chip">Keep info fresh</span>
+          </div>
+
+          <div class="store-banner mb-3">
+            <?php if($profile['banner']): ?>
+              <img src="<?php echo e(base_url($profile['banner'])); ?>" alt="Store banner" class="img-fluid">
+            <?php else: ?>
+              <div class="empty-banner">Add a wide hero banner</div>
+            <?php endif; ?>
+            <form method="post" enctype="multipart/form-data" class="store-banner__upload">
+              <?php echo csrf_field(); ?>
+              <input type="hidden" name="action" value="upload_banner">
+              <label class="btn btn-outline-primary w-100 mb-0">
+                <input type="file" name="image" accept="image/*" required hidden>
+                Upload banner
+              </label>
+            </form>
+          </div>
+
+          <div class="store-logo mb-4">
+            <div class="store-logo__preview">
+              <?php if($profile['logo']): ?>
+                <img src="<?php echo e(base_url($profile['logo'])); ?>" alt="Store logo">
+              <?php else: ?>
+                <span>Logo</span>
+              <?php endif; ?>
+            </div>
+            <form method="post" enctype="multipart/form-data" class="w-100">
+              <?php echo csrf_field(); ?>
+              <input type="hidden" name="action" value="upload_logo">
+              <label class="btn btn-outline-primary w-100 mb-0">
+                <input type="file" name="image" accept="image/*" required hidden>
+                Upload logo
+              </label>
+            </form>
+          </div>
+
+          <form method="post" class="store-profile-form">
+            <?php echo csrf_field(); ?>
+            <input type="hidden" name="action" value="update_profile">
+            <label class="form-label">Store name</label>
+            <input class="form-control mb-3" name="shop_name" value="<?php echo e($profile['shop_name']); ?>" required>
+
+            <label class="form-label">Short bio</label>
+            <textarea class="form-control mb-3" name="description" rows="3" placeholder="Describe your style and promise."><?php echo e($profile['description'] ?? ''); ?></textarea>
+
+            <div class="row g-3">
+              <div class="col-12">
+                <label class="form-label">Shipping policy</label>
+                <textarea class="form-control" name="shipping_policy" rows="3"><?php echo e($profile['shipping_policy'] ?? ''); ?></textarea>
+              </div>
+              <div class="col-12">
+                <label class="form-label">Return policy</label>
+                <textarea class="form-control" name="return_policy" rows="3"><?php echo e($profile['return_policy'] ?? ''); ?></textarea>
+              </div>
+            </div>
+            <button class="btn btn-primary w-100 mt-4">Save profile</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="seller-stack" id="inventory">
+        <div class="card p-4 mb-4">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <div>
+              <p class="section-label mb-1">Quick publish</p>
+              <h5 class="mb-0">Add Product</h5>
+            </div>
+            <span class="badge-chip">Boost your catalog</span>
+          </div>
+          <form method="post" enctype="multipart/form-data" class="row g-3">
+            <?php echo csrf_field(); ?>
+            <input type="hidden" name="action" value="create_product">
+            <div class="col-md-6">
+              <label class="form-label">Product name</label>
+              <input class="form-control" name="name" placeholder="Premium sneakers" required>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Top category</label>
+              <select name="category_id" id="product_category_id" class="form-select">
+                <option value="">Pick one</option>
+                <?php foreach($topCategories as $tc): ?>
+                  <option value="<?php echo (int)$tc['category_id']; ?>"><?php echo e($tc['name']); ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Subcategory</label>
+              <select name="subcategory_id" id="product_subcategory_id" class="form-select">
+                <option value="">Optional</option>
+                <?php foreach($subCategories as $sc): ?>
+                  <option data-parent="<?php echo (int)$sc['parent_id']; ?>" value="<?php echo (int)$sc['category_id']; ?>"><?php echo e($sc['name']); ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Price</label>
+              <input type="number" step="0.01" name="price" class="form-control" placeholder="100" required>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label">Stock</label>
+              <input type="number" name="stock" class="form-control" placeholder="10" required>
+            </div>
+            <div class="col-md-7">
+              <label class="form-label">Short description</label>
+              <textarea name="description" class="form-control" rows="2" placeholder="Highlight materials, benefits, delivery promises"></textarea>
+            </div>
+            <div class="col-12">
+              <div class="row g-3 align-items-end">
+                <div class="col-md-4">
+                  <label class="form-label">Image source</label>
+                  <select id="image_method_select" name="image_method" class="form-select">
+                    <option value="upload">Upload</option>
+                    <option value="url">Image URL</option>
+                    <option value="gdrive">Google Drive URL</option>
+                  </select>
+                </div>
+                <div class="col-md-4">
+                  <div id="img_block_upload" class="img-block">
+                    <label class="form-label">Upload file</label>
+                    <input type="file" name="image" id="image_input" class="form-control" accept="image/*">
+                  </div>
+                  <div id="img_block_url" class="img-block" style="display:none;">
+                    <label class="form-label">Direct URL</label>
+                    <input type="url" name="image_url" id="image_url_input" class="form-control" placeholder="https://...">
+                  </div>
+                  <div id="img_block_gdrive" class="img-block" style="display:none;">
+                    <label class="form-label">Drive share link</label>
+                    <input type="url" name="gdrive_url" id="gdrive_url_input" class="form-control" placeholder="https://drive.google.com/...">
+                  </div>
+                </div>
+                <div class="col-md-4 text-center">
+                  <label class="form-label">Preview</label>
+                  <div class="product-preview">
+                    <img id="image_preview" src="" alt="Preview" style="display:none;">
+                    <div class="text-muted small" id="image_preview_placeholder">Upload or link an image</div>
                   </div>
                 </div>
               </div>
-            <?php endforeach; ?>
+            </div>
+            <div class="col-12 d-flex flex-wrap gap-2">
+              <button class="btn btn-primary">Publish product</button>
+              <button class="btn btn-outline-secondary" type="reset">Reset</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="card p-4 h-100">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+            <div>
+              <p class="section-label mb-1">Catalog</p>
+              <h5 class="mb-0">My Products</h5>
+            </div>
+            <a href="<?php echo e(base_url('seller/products.php')); ?>" class="pill-button pill-button--ghost">Open manager</a>
           </div>
-        <?php else: ?>
-          <p class="text-muted small mb-0">No coupons yet. Create one above!</p>
-        <?php endif; ?>
-      </div>
+
+          <form method="get" class="row g-2 mb-4">
+            <div class="col-md-6">
+              <input type="search" name="q" class="form-control" placeholder="Search products" value="<?php echo e($q); ?>">
+            </div>
+            <div class="col-md-3">
+              <select id="top_cat" name="top_cat" class="form-select">
+                <option value="">All categories</option>
+                <?php foreach($topCategories as $tc): ?>
+                  <option value="<?php echo (int)$tc['category_id']; ?>" <?php echo ($top_cat==(int)$tc['category_id']?'selected':''); ?>><?php echo e($tc['name']); ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div class="col-md-3">
+              <select id="sub_cat" name="sub_cat" class="form-select">
+                <option value="">All subcategories</option>
+                <?php if($top_cat):
+                  $subStmt = $pdo->prepare('SELECT * FROM categories WHERE parent_id = ? ORDER BY name');
+                  $subStmt->execute([$top_cat]);
+                  $subList = $subStmt->fetchAll();
+                  foreach($subList as $sc): ?>
+                    <option value="<?php echo (int)$sc['category_id']; ?>" <?php echo ($sub_cat==(int)$sc['category_id']?'selected':''); ?>><?php echo e($sc['name']); ?></option>
+                  <?php endforeach; endif; ?>
+              </select>
+            </div>
+          </form>
+
+          <div class="table-modern overflow-auto">
+            <table class="table table-borderless align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Price</th>
+                  <th>Stock</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php foreach($products as $p): ?>
+                  <tr>
+                    <td>
+                      <div class="product-row">
+                        <img src="<?php echo e($p['image'] && (strpos($p['image'],'http') === 0) ? $p['image'] : ($p['image'] ? base_url($p['image']) : base_url('assets/images/products/placeholder.png'))); ?>" alt="<?php echo e($p['name']); ?>">
+                        <div>
+                          <strong><?php echo e($p['name']); ?></strong>
+                          <p class="text-muted small mb-0">SKU #<?php echo (int)$p['product_id']; ?></p>
+                        </div>
+                      </div>
+                    </td>
+                    <td>$<?php echo number_format((float)$p['price'],2); ?></td>
+                    <td><?php echo (int)$p['stock']; ?></td>
+                    <td><span class="badge bg-<?php echo ($p['status']==='active'?'success':'secondary'); ?>"><?php echo e($p['status']); ?></span></td>
+                    <td class="text-end d-flex flex-wrap justify-content-end gap-2">
+                      <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#edit_<?php echo (int)$p['product_id']; ?>">Edit</button>
+                      <form method="post" onsubmit="return confirm('Delete this product?');">
+                        <?php echo csrf_field(); ?>
+                        <input type="hidden" name="action" value="delete_product">
+                        <input type="hidden" name="product_id" value="<?php echo (int)$p['product_id']; ?>">
+                        <button class="btn btn-sm btn-outline-danger">Delete</button>
+                      </form>
+                    </td>
+                  </tr>
+                  <tr class="collapse" id="edit_<?php echo (int)$p['product_id']; ?>">
+                    <td colspan="5" class="bg-light border-top">
+                      <form method="post" class="row g-2">
+                        <?php echo csrf_field(); ?>
+                        <input type="hidden" name="action" value="update_product">
+                        <input type="hidden" name="product_id" value="<?php echo (int)$p['product_id']; ?>">
+                        <div class="col-md-5"><input class="form-control" name="name" value="<?php echo e($p['name']); ?>" required></div>
+                        <div class="col-md-2"><input type="number" step="0.01" class="form-control" name="price" value="<?php echo e($p['price']); ?>" required></div>
+                        <div class="col-md-2"><input type="number" class="form-control" name="stock" value="<?php echo (int)$p['stock']; ?>" required></div>
+                        <div class="col-md-2">
+                          <select class="form-select" name="status">
+                            <option value="active" <?php echo ($p['status']==='active'?'selected':''); ?>>Active</option>
+                            <option value="inactive" <?php echo ($p['status']==='inactive'?'selected':''); ?>>Inactive</option>
+                          </select>
+                        </div>
+                        <div class="col-md-1 d-grid"><button class="btn btn-primary">Save</button></div>
+                      </form>
+                    </td>
+                  </tr>
+                <?php endforeach; ?>
+                <?php if(!$products): ?><tr><td colspan="5" class="text-center text-muted py-4">No products yet. Add your first listing to get traction.</td></tr><?php endif; ?>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="seller-stack seller-stack--sidebar">
+        <div class="card p-4 mb-4">
+          <p class="section-label mb-1">Growth lever</p>
+          <h5 class="mb-3">Add Coupon</h5>
+          <form method="post" class="small">
+            <?php echo csrf_field(); ?>
+            <input type="hidden" name="action" value="add_coupon">
+            <div class="mb-3">
+              <label class="form-label">Code</label>
+              <input class="form-control" name="code" placeholder="CODE2025" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Type & value</label>
+              <div class="input-group">
+                <select name="type" class="form-select" style="max-width:45%">
+                  <option value="fixed">Fixed</option>
+                  <option value="percent">Percent</option>
+                </select>
+                <input type="number" step="0.01" name="value" class="form-control" placeholder="Value" required>
+              </div>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Expires</label>
+              <input type="datetime-local" name="expires_at" class="form-control">
+            </div>
+            <div class="mb-4">
+              <label class="form-label">Max uses</label>
+              <input type="number" name="max_uses" class="form-control" placeholder="0 = unlimited" value="0">
+            </div>
+            <button class="btn btn-primary w-100">Create coupon</button>
+          </form>
+        </div>
+
+        <div class="card p-4">
+          <p class="section-label mb-1">Active promos</p>
+          <h5 class="mb-3">Store Coupons</h5>
+          <?php if (count($coupons) > 0): ?>
+            <div class="coupon-stack">
+              <?php foreach ($coupons as $coupon): 
+                $isExpired = $coupon['expires_at'] && strtotime($coupon['expires_at']) < time();
+                $isMaxed = $coupon['max_uses'] > 0 && $coupon['used_count'] >= $coupon['max_uses'];
+              ?>
+                <div class="coupon-card <?php echo ($isExpired ? 'coupon-card--muted' : ''); ?>">
+                  <div class="coupon-code"><?php echo e($coupon['code']); ?></div>
+                  <p class="mb-1 text-muted small">
+                    <?php echo e($coupon['type']); ?> ·
+                    <?php if ($coupon['type'] === 'percent'): ?>
+                      <?php echo e($coupon['value']); ?>%
+                    <?php else: ?>
+                      $<?php echo e($coupon['value']); ?>
+                    <?php endif; ?>
+                  </p>
+                  <p class="mb-1 text-muted small">
+                    <?php if ($coupon['expires_at']): ?>
+                      Expires <?php echo e(date('M j, Y', strtotime($coupon['expires_at']))); ?>
+                      <?php if ($isExpired): ?><span class="text-danger">(Expired)</span><?php endif; ?>
+                    <?php else: ?>
+                      No expiration
+                    <?php endif; ?>
+                  </p>
+                  <p class="mb-0 text-muted small">
+                    Used <?php echo (int)$coupon['used_count']; ?>
+                    <?php if ($coupon['max_uses'] > 0): ?>
+                      / <?php echo (int)$coupon['max_uses']; ?>
+                      <?php if ($isMaxed): ?><span class="text-warning">(Max reached)</span><?php endif; ?>
+                    <?php else: ?>
+                      (Unlimited)
+                    <?php endif; ?>
+                  </p>
+                </div>
+              <?php endforeach; ?>
+            </div>
+          <?php else: ?>
+            <div class="empty-panel text-center">
+              <p class="mb-1 fw-semibold">No coupons yet</p>
+              <p class="text-muted small mb-0">Create a promo code to reward loyal buyers.</p>
+            </div>
+          <?php endif; ?>
+        </div>
+      </section>
     </div>
   </div>
 <?php endif; ?>
@@ -553,26 +794,100 @@ include __DIR__ . '/../templates/header.php';
       map[pid].push(c);
     });
     var top = document.getElementById('top_cat');
+    var top = document.getElementById('top_cat');
     var sub = document.getElementById('sub_cat');
-    if (!top || !sub) return;
-    top.addEventListener('change', function(){
-      var val = parseInt(this.value) || 0;
-      // clear subs
-      sub.innerHTML = '<option value="">All subcategories</option>';
-      if (map[val]){
-        map[val].forEach(function(c){
-          var o = document.createElement('option');
-          o.value = c.category_id;
-          o.textContent = c.name;
-          sub.appendChild(o);
-        });
+    if (top && sub){
+      top.addEventListener('change', function(){
+        var val = parseInt(this.value) || 0;
+        sub.innerHTML = '<option value="">All subcategories</option>';
+        if (map[val]){
+          map[val].forEach(function(c){
+            var o = document.createElement('option');
+            o.value = c.category_id;
+            o.textContent = c.name;
+            sub.appendChild(o);
+          });
+        }
+      });
+      var form = top.closest('form');
+      if (form){
+        top.addEventListener('change', function(){ form.submit(); });
+        sub.addEventListener('change', function(){ form.submit(); });
       }
-    });
-    // auto-submit when selecting filters
-    var form = top && top.closest('form');
-    if (form){
-      top.addEventListener('change', function(){ form.submit(); });
-      sub.addEventListener('change', function(){ form.submit(); });
     }
+
+    var prodCat = document.getElementById('product_category_id');
+    var prodSub = document.getElementById('product_subcategory_id');
+    function filterProductSubs(){
+      if (!prodCat || !prodSub) return;
+      var selected = prodCat.value ? Number(prodCat.value) : 0;
+      [].forEach.call(prodSub.options, function(opt){
+        var parent = Number(opt.getAttribute('data-parent')) || 0;
+        if (!parent) { opt.hidden = false; return; }
+        opt.hidden = selected && parent !== selected;
+        if (opt.hidden && opt.selected) { prodSub.value = ''; }
+      });
+    }
+    if (prodCat) {
+      prodCat.addEventListener('change', filterProductSubs);
+      filterProductSubs();
+    }
+
+    var methodSelect = document.getElementById('image_method_select');
+    var blockUpload = document.getElementById('img_block_upload');
+    var blockUrl = document.getElementById('img_block_url');
+    var blockGdrive = document.getElementById('img_block_gdrive');
+    var inputFile = document.getElementById('image_input');
+    var inputUrl = document.getElementById('image_url_input');
+    var inputG = document.getElementById('gdrive_url_input');
+    var preview = document.getElementById('image_preview');
+    var previewPlaceholder = document.getElementById('image_preview_placeholder');
+
+    function setPreview(src){
+      if (preview && previewPlaceholder){
+        if (src){
+          preview.src = src;
+          preview.style.display = 'block';
+          previewPlaceholder.style.display = 'none';
+        } else {
+          preview.src = '';
+          preview.style.display = 'none';
+          previewPlaceholder.style.display = 'block';
+        }
+      }
+    }
+
+    function setMethod(val){
+      if (!blockUpload) return;
+      blockUpload.style.display = (val === 'upload') ? '' : 'none';
+      blockUrl.style.display = (val === 'url') ? '' : 'none';
+      blockGdrive.style.display = (val === 'gdrive') ? '' : 'none';
+      if (val !== 'upload' && inputFile){ inputFile.value = ''; }
+      if (val !== 'url' && inputUrl){ inputUrl.value = ''; }
+      if (val !== 'gdrive' && inputG){ inputG.value = ''; }
+      setPreview('');
+    }
+
+    if (methodSelect){
+      methodSelect.addEventListener('change', function(){ setMethod(this.value); });
+      setMethod(methodSelect.value || 'upload');
+    }
+
+    if (inputFile){
+      inputFile.addEventListener('change', function(e){
+        var file = e.target.files && e.target.files[0];
+        if (!file){ setPreview(''); return; }
+        var reader = new FileReader();
+        reader.onload = function(ev){ setPreview(ev.target.result); };
+        reader.readAsDataURL(file);
+      });
+    }
+    function handleLinkPreview(evt){
+      var val = evt.target.value.trim();
+      if (val && /^https?:\/\//i.test(val)){ setPreview(val); }
+      else { setPreview(''); }
+    }
+    if (inputUrl){ inputUrl.addEventListener('input', handleLinkPreview); }
+    if (inputG){ inputG.addEventListener('input', handleLinkPreview); }
   })();
 </script>

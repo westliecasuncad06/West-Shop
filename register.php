@@ -31,41 +31,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 include __DIR__ . '/templates/header.php';
 ?>
-<div class="row justify-content-center">
-  <div class="col-md-7 col-lg-6">
-    <div class="card p-4">
+
+<section class="auth-shell">
+  <div class="auth-hero">
+    <span class="badge-soft mb-3">Join West-Shop</span>
+    <h2 class="auth-hero__title mb-3">Create an account crafted for modern buying & selling</h2>
+    <p class="text-muted-soft mb-4">Unlock curated storefronts, transparent seller vetting, and joyful checkout experiences.</p>
+    <ul class="auth-hero__list mb-4">
+      <li><i class="bi bi-stars text-warning"></i> Curated categories & inspiration</li>
+      <li><i class="bi bi-people text-primary"></i> Trusted community with verified sellers</li>
+      <li><i class="bi bi-graph-up-arrow text-success"></i> Insights and dashboards for sellers</li>
+    </ul>
+    <div class="auth-badges">
+      <span class="auth-badge"><i class="bi bi-patch-check"></i> Admin approved sellers</span>
+      <span class="auth-badge"><i class="bi bi-cash-coin"></i> Secure transactions</span>
+    </div>
+  </div>
+  <div class="auth-card">
+    <div class="surface-card">
       <h4 class="mb-3">Create your account</h4>
-      <form method="post">
+      <form method="post" class="d-flex flex-column gap-3">
         <?php echo csrf_field(); ?>
-        <div class="mb-3">
+        <div>
           <label class="form-label">I am a</label>
           <select name="role" class="form-select">
             <option value="buyer">Buyer</option>
             <option value="seller">Seller (requires admin approval)</option>
           </select>
         </div>
-        <div class="mb-3">
+        <div>
           <label class="form-label">Full Name</label>
-          <input type="text" name="name" class="form-control" required>
+          <input type="text" name="name" class="form-control" placeholder="Jane Mercado" required>
         </div>
-        <div class="mb-3">
+        <div>
           <label class="form-label">Email</label>
-          <input type="email" name="email" class="form-control" required>
+          <input type="email" name="email" class="form-control" placeholder="you@example.com" required>
         </div>
-        <div class="row">
-          <div class="col-md-6 mb-3">
+        <div class="row g-3">
+          <div class="col-md-6">
             <label class="form-label">Password</label>
             <input type="password" name="password" class="form-control" required>
           </div>
-          <div class="col-md-6 mb-3">
+          <div class="col-md-6">
             <label class="form-label">Confirm Password</label>
             <input type="password" name="password2" class="form-control" required>
           </div>
         </div>
         <button class="btn btn-primary w-100">Sign Up</button>
       </form>
-      <p class="mt-3 mb-0">Already have an account? <a href="login.php">Login</a></p>
+      <p class="mt-4 mb-0 text-center">Already have an account? <a href="login.php">Login</a></p>
     </div>
   </div>
-</div>
+</section>
+
 <?php include __DIR__ . '/templates/footer.php'; ?>

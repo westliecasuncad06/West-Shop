@@ -22,6 +22,9 @@ if (!$p) {
 $sellerId = (int)($p['seller_id'] ?? 0);
 $store = $sellerId ? get_seller_profile($sellerId) : null;
 $storeRating = $sellerId ? get_store_rating($sellerId) : ['avg'=>0,'cnt'=>0];
+$productRating = (float) get_product_rating((int)$p['product_id']);
+$reviews = get_reviews((int)$p['product_id']);
+$reviewsCount = count($reviews);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if (!csrf_verify()) { http_response_code(400); exit('Bad CSRF'); }
@@ -74,9 +77,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else { // rate_store
       $rating = max(1, min(5, (int)($_POST['rating'] ?? 5)));
       $comment = trim($_POST['comment'] ?? '');
-      $up = $pdo->prepare('INSERT INTO store_reviews(seller_id,buyer_id,rating,comment) VALUES (?,?,?,?)
-                           ON DUPLICATE KEY UPDATE rating=VALUES(rating), comment=VALUES(comment), updated_at=NOW()');
-      $up->execute([$sellerId, $user['user_id'], $rating, $comment]);
+      $hasStoreId = store_reviews_has_column('store_id');
+      $hasSellerId = store_reviews_has_column('seller_id');
+
+      $columns = [];
+      $params = [];
+      if ($hasStoreId) {
+        $sid = get_store_id_for_seller($sellerId);
+        if (!$sid) { set_flash('danger','Store is not available for rating.'); redirect('public/product.php?id=' . $p['product_id']); }
+        $columns[] = 'store_id';
+        $params[] = $sid;
+      }
+      if ($hasSellerId) {
+        $columns[] = 'seller_id';
+        $params[] = $sellerId;
+      }
+      $columns = array_merge($columns, ['buyer_id','rating','comment']);
+      $params = array_merge($params, [$user['user_id'], $rating, $comment]);
+
+      $placeholders = rtrim(str_repeat('?,', count($columns)), ',');
+      $sql = 'INSERT INTO store_reviews(' . implode(',', $columns) . ')
+                           VALUES (' . $placeholders . ')
+                           ON DUPLICATE KEY UPDATE rating=VALUES(rating), comment=VALUES(comment)';
+      if (store_reviews_has_updated_at()) {
+        $sql .= ', updated_at=NOW()';
+      }
+      $up = $pdo->prepare($sql);
+      $up->execute($params);
       set_flash('success','Thanks for rating the store.');
     }
     redirect('public/product.php?id=' . $p['product_id']);
@@ -84,86 +111,179 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 ?>
 
-<div class="row g-4">
-  <div class="col-md-5">
-    <img src="<?php echo e(product_image_src($p['image'] ?? null, 'https://via.placeholder.com/600x450?text=Product')); ?>" class="img-fluid rounded-4 shadow-sm" alt="">
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
+  <a href="<?php echo e(base_url('index.php')); ?>" class="text-decoration-none text-muted d-flex align-items-center gap-2 small">
+    <i class="bi bi-arrow-left"></i> Back to discoveries
+  </a>
+  <span class="badge-chip">Product ID #<?php echo (int)$p['product_id']; ?></span>
+</div>
+
+<div class="row g-4 align-items-start">
+  <div class="col-lg-6">
+    <div class="product-gallery position-relative">
+      <img src="<?php echo e(product_image_src($p['image'] ?? null, 'https://via.placeholder.com/700x520?text=Product')); ?>" alt="<?php echo e($p['name']); ?> visual">
+    </div>
   </div>
-  <div class="col-md-7">
-    <h3 class="fw-semibold mb-1"><?php echo e($p['name']); ?></h3>
-    <div class="text-muted mb-2"><?php echo e($p['category_name'] ?? ''); ?> • by <?php echo e($p['seller_name'] ?? ''); ?></div>
-    <?php if($sellerId && $store): ?>
-      <div class="mb-2 d-flex align-items-center gap-2 flex-wrap">
-        <a class="btn btn-sm btn-outline-secondary" href="<?php echo e(base_url('seller/store_public.php?seller_id='.(int)$sellerId)); ?>">Visit Store</a>
-        <span class="small text-muted">Store rating: <strong><?php echo number_format((float)$storeRating['avg'],1); ?></strong> (<?php echo (int)$storeRating['cnt']; ?>)</span>
-        <?php if(isset($_SESSION['user']) && $_SESSION['user']['role']==='buyer'): ?>
-          <?php $isFollowing = is_store_followed($_SESSION['user']['user_id'], $sellerId); ?>
-          <form method="post" class="d-inline">
-            <?php echo csrf_field(); ?>
-            <input type="hidden" name="action" value="<?php echo $isFollowing ? 'unfollow_store' : 'follow_store'; ?>">
-            <button class="btn btn-sm btn-<?php echo $isFollowing ? 'secondary' : 'primary'; ?>"><?php echo $isFollowing ? 'Unfollow Store' : 'Follow Store'; ?></button>
-          </form>
-          <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#rateStoreForm">Rate Store</button>
-        <?php else: ?>
-          <a class="btn btn-sm btn-outline-secondary" href="<?php echo e(base_url('login.php')); ?>">Login to follow/rate</a>
-        <?php endif; ?>
+  <div class="col-lg-6">
+    <div class="card product-info-card p-4 h-100">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+        <span class="badge-chip"><?php echo e($p['category_name'] ?? 'General'); ?></span>
+        <span class="rating-pill"><i class="bi bi-star-fill"></i> <?php echo number_format($productRating,1); ?> / 5 · <?php echo $reviewsCount; ?> review<?php echo $reviewsCount===1?'':'s'; ?></span>
       </div>
-      <?php if(isset($_SESSION['user']) && $_SESSION['user']['role']==='buyer'): ?>
-      <div id="rateStoreForm" class="collapse mb-2">
-        <form method="post" class="d-flex align-items-center gap-2 flex-wrap">
-          <?php echo csrf_field(); ?>
-          <input type="hidden" name="action" value="rate_store">
-          <label class="small text-muted me-1">Your rating:</label>
-          <select name="rating" class="form-select form-select-sm" style="width:80px">
-            <?php for($i=5;$i>=1;$i--): ?><option value="<?php echo $i; ?>"><?php echo $i; ?></option><?php endfor; ?>
-          </select>
-          <input name="comment" class="form-control form-control-sm" style="max-width:320px" placeholder="Optional comment">
-          <button class="btn btn-sm btn-outline-primary">Submit</button>
-        </form>
+      <h2 class="fw-semibold mb-2"><?php echo e($p['name']); ?></h2>
+      <div class="text-muted mb-4">by <span class="fw-semibold"><?php echo e($p['seller_name'] ?? 'Marketplace seller'); ?></span></div>
+      <div>
+        <div class="price-tag">$<?php echo number_format((float)$p['price'],2); ?></div>
+        <div class="price-caption">Price includes VAT. Free cancellation within 24h.</div>
       </div>
+      <div class="perks-list mt-4">
+        <div class="perks-list__item"><span class="perks-list__icon"><i class="bi bi-truck"></i></span>Fast shipping nationwide</div>
+        <div class="perks-list__item"><span class="perks-list__icon"><i class="bi bi-shield-check"></i></span>Buyer protection up to $500</div>
+        <div class="perks-list__item"><span class="perks-list__icon"><i class="bi bi-arrow-repeat"></i></span>7-day easy returns</div>
+      </div>
+      <form method="post" id="addToCartForm" class="d-flex flex-column gap-3 mt-4">
+        <?php echo csrf_field(); ?>
+        <input type="hidden" name="action" value="add">
+        <label class="fw-semibold small text-uppercase">Quantity</label>
+        <div class="qty-input-group d-inline-flex align-items-center gap-2">
+          <input type="number" name="qty" min="1" value="1" class="form-control" aria-label="Quantity">
+        </div>
+        <button type="submit" class="btn btn-primary btn-lg w-100" id="addToCartBtn">Add to cart</button>
+        <div class="small text-muted text-center">Secure checkout powered by West Shop Pay</div>
+      </form>
+
+      <?php if($sellerId && $store): ?>
+        <div class="card store-card p-4 mt-4">
+          <div class="d-flex align-items-center gap-3 flex-wrap">
+            <div class="store-avatar"><?php echo strtoupper(substr($store['store_name'] ?? ($p['seller_name'] ?? 'W'), 0, 1)); ?></div>
+            <div>
+              <div class="fw-semibold"><?php echo e($store['store_name'] ?? ($p['seller_name'] ?? 'Featured Store')); ?></div>
+              <div class="text-muted small">Rating <?php echo number_format((float)$storeRating['avg'],1); ?> · <?php echo (int)$storeRating['cnt']; ?> review<?php echo ((int)$storeRating['cnt'])===1?'':'s'; ?></div>
+            </div>
+          </div>
+          <div class="d-flex flex-wrap gap-2 mt-3">
+            <a class="btn btn-outline-primary" href="<?php echo e(base_url('seller/store_public.php?seller_id='.(int)$sellerId)); ?>">Visit Store</a>
+            <?php if(isset($_SESSION['user']) && $_SESSION['user']['role']==='buyer'): ?>
+              <?php $isFollowing = is_store_followed($_SESSION['user']['user_id'], $sellerId); ?>
+              <form method="post">
+                <?php echo csrf_field(); ?>
+                <input type="hidden" name="action" value="<?php echo $isFollowing ? 'unfollow_store' : 'follow_store'; ?>">
+                <button class="btn btn-<?php echo $isFollowing ? 'secondary' : 'primary'; ?>"><?php echo $isFollowing ? 'Unfollow Store' : 'Follow Store'; ?></button>
+              </form>
+              <button class="btn btn-outline-secondary" data-bs-toggle="collapse" data-bs-target="#rateStoreForm">Rate Store</button>
+            <?php else: ?>
+              <a class="btn btn-outline-secondary" href="<?php echo e(base_url('login.php')); ?>">Login to follow</a>
+            <?php endif; ?>
+          </div>
+          <?php if(isset($_SESSION['user']) && $_SESSION['user']['role']==='buyer'): ?>
+            <div id="rateStoreForm" class="collapse mt-3">
+              <form method="post" class="row g-2">
+                <?php echo csrf_field(); ?>
+                <input type="hidden" name="action" value="rate_store">
+                <div class="col-12 col-md-4">
+                  <select name="rating" class="form-select">
+                    <?php for($i=5;$i>=1;$i--): ?><option value="<?php echo $i; ?>"><?php echo $i; ?></option><?php endfor; ?>
+                  </select>
+                </div>
+                <div class="col-12 col-md-6">
+                  <input name="comment" class="form-control" placeholder="Optional feedback">
+                </div>
+                <div class="col-12 col-md-2 d-grid">
+                  <button class="btn btn-primary">Submit</button>
+                </div>
+              </form>
+            </div>
+          <?php endif; ?>
+        </div>
       <?php endif; ?>
-    <?php endif; ?>
-    <p class="lead">$<?php echo number_format((float)$p['price'],2); ?></p>
-    <div class="mb-2">Rating: <strong><?php echo number_format(get_product_rating((int)$p['product_id']),1); ?></strong> / 5</div>
-    <p><?php echo nl2br(e($p['description'] ?? '')); ?></p>
-    <form method="post" id="addToCartForm" class="d-flex align-items-center gap-2">
-      <?php echo csrf_field(); ?>
-      <input type="hidden" name="action" value="add">
-      <input type="number" name="qty" class="form-control" style="max-width:120px" min="1" value="1">
-      <button type="submit" class="btn btn-primary" id="addToCartBtn">Add to Cart</button>
-    </form>
+    </div>
   </div>
 </div>
 
-<hr>
-<h5>Reviews</h5>
-<?php foreach(get_reviews((int)$p['product_id']) as $r): ?>
-  <div class="card p-3 mb-2">
-    <div class="d-flex justify-content-between">
-      <div><strong><?php echo e($r['buyer_name'] ?? 'Buyer'); ?></strong></div>
-      <div class="text-muted small"><?php echo e($r['created_at']); ?></div>
+<div class="row g-4 mt-2">
+  <div class="col-lg-8">
+    <div class="card p-4 h-100">
+      <div class="section-label mb-2">Product details</div>
+      <?php if(!empty($p['description'])): ?>
+        <p class="mb-0"><?php echo nl2br(e($p['description'])); ?></p>
+      <?php else: ?>
+        <div class="text-muted">Seller has not provided a detailed description yet.</div>
+      <?php endif; ?>
     </div>
-    <div class="mt-2">Rating: <?php echo (int)$r['rating']; ?> / 5</div>
-    <div class="mt-2"><?php echo nl2br(e($r['comment'])); ?></div>
   </div>
-<?php endforeach; ?>
+  <div class="col-lg-4">
+    <div class="card p-4 h-100">
+      <div class="section-label mb-2">Why customers love it</div>
+      <ul class="feature-list">
+        <li><i class="bi bi-check"></i>Premium materials sourced from verified suppliers.</li>
+        <li><i class="bi bi-check"></i>Dedicated support channel with same-day responses.</li>
+        <li><i class="bi bi-check"></i>Guarantee of replacement when damaged on arrival.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<section class="mt-5" id="reviews">
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <div>
+      <h5 class="mb-0">Customer Reviews</h5>
+      <div class="text-muted small"><?php echo $reviewsCount; ?> review<?php echo $reviewsCount===1?'':'s'; ?> · Average <?php echo number_format($productRating,1); ?>/5</div>
+    </div>
+    <?php if(isset($_SESSION['user']) && $_SESSION['user']['role'] === 'buyer'): ?>
+      <a href="#write-review" class="btn btn-outline-primary btn-sm">Write a review</a>
+    <?php endif; ?>
+  </div>
+
+  <?php if($reviews): ?>
+    <div class="d-flex flex-column gap-3">
+      <?php foreach($reviews as $r): ?>
+        <div class="review-card">
+          <div class="review-meta">
+            <div>
+              <strong><?php echo e($r['buyer_name'] ?? 'Buyer'); ?></strong>
+              <div class="text-muted small">Rated <?php echo (int)$r['rating']; ?>/5</div>
+            </div>
+            <span class="text-muted small"><?php echo e($r['created_at']); ?></span>
+          </div>
+          <?php if(!empty($r['comment'])): ?>
+            <p class="mt-3 mb-0"><?php echo nl2br(e($r['comment'])); ?></p>
+          <?php else: ?>
+            <p class="mt-3 mb-0 text-muted">No comment provided.</p>
+          <?php endif; ?>
+        </div>
+      <?php endforeach; ?>
+    </div>
+  <?php else: ?>
+    <div class="empty-panel">
+      <h6 class="mb-1">No reviews yet</h6>
+      <p class="text-muted mb-0">Be the first to share how this product helped you.</p>
+    </div>
+  <?php endif; ?>
+</section>
 
 <?php if(isset($_SESSION['user']) && $_SESSION['user']['role'] === 'buyer'): ?>
-  <div class="card p-3">
-    <h6>Leave a review</h6>
-    <form method="post">
+  <div class="card p-4 mt-4" id="write-review">
+    <h6 class="mb-3">Leave a review</h6>
+    <form method="post" class="row g-3">
       <?php echo csrf_field(); ?>
       <input type="hidden" name="action" value="review">
-      <div class="mb-2"><label class="form-label">Rating</label>
-        <select name="rating" class="form-select" style="max-width:120px">
+      <div class="col-12 col-md-3">
+        <label class="form-label">Rating</label>
+        <select name="rating" class="form-select">
           <?php for($i=5;$i>=1;$i--): ?><option value="<?php echo $i; ?>"><?php echo $i; ?></option><?php endfor; ?>
         </select>
       </div>
-      <div class="mb-2"><textarea name="comment" class="form-control" rows="3" placeholder="Write your review"></textarea></div>
-      <button class="btn btn-outline-primary">Submit Review</button>
+      <div class="col-12 col-md-9">
+        <label class="form-label">Comments</label>
+        <textarea name="comment" class="form-control" rows="3" placeholder="Share details that would help other buyers"></textarea>
+      </div>
+      <div class="col-12">
+        <button class="btn btn-primary">Submit review</button>
+      </div>
     </form>
   </div>
 <?php else: ?>
-  <div class="text-muted">Only buyers can leave reviews. Please <a href="<?php echo e(base_url('login.php')); ?>">login</a> or create an account.</div>
+  <div class="text-muted mt-4">Only buyers can leave reviews. Please <a href="<?php echo e(base_url('login.php')); ?>">login</a> or create an account.</div>
 <?php endif; ?>
 
 <?php if(!isset($_SESSION['user']) || $_SESSION['user']['role'] !== 'buyer'): ?>

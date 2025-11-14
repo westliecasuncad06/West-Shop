@@ -19,27 +19,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 include __DIR__ . '/templates/header.php';
 ?>
-<div class="row justify-content-center">
-  <div class="col-md-6 col-lg-5">
-    <div class="card p-4">
+
+<section class="auth-shell">
+  <div class="auth-hero">
+    <span class="badge-soft mb-3">Marketplace essentials</span>
+    <h2 class="auth-hero__title mb-3">Log in to keep shopping with confidence</h2>
+    <p class="text-muted-soft mb-4">Track orders, message sellers, and enjoy secure checkout flows designed for modern buyers.</p>
+    <ul class="auth-hero__list mb-4">
+      <li><i class="bi bi-shield-check text-primary"></i> Buyer protection on every transaction</li>
+      <li><i class="bi bi-lightning-charge text-warning"></i> Faster checkout with saved preferences</li>
+      <li><i class="bi bi-chat-dots text-success"></i> Seamless chat for clarifications</li>
+    </ul>
+    <div class="auth-badges">
+      <span class="auth-badge"><i class="bi bi-lock"></i> 2FA-ready</span>
+      <span class="auth-badge"><i class="bi bi-emoji-smile"></i> Human support</span>
+    </div>
+  </div>
+  <div class="auth-card">
+    <div class="surface-card">
       <h4 class="mb-3">Welcome back</h4>
-      <form method="post">
+      <form method="post" class="d-flex flex-column gap-3">
         <?php echo csrf_field(); ?>
-        <div class="mb-3">
+        <div>
           <label class="form-label">Email</label>
-          <input type="email" name="email" class="form-control" required>
+          <input type="email" name="email" class="form-control" placeholder="you@example.com" required>
         </div>
-        <div class="mb-3">
-          <label class="form-label">Password</label>
-          <input type="password" name="password" class="form-control" required>
+        <div>
+          <div class="d-flex justify-content-between align-items-center">
+            <label class="form-label mb-0">Password</label>
+            <a href="#" class="small text-decoration-none">Forgot?</a>
+          </div>
+          <input type="password" name="password" class="form-control" placeholder="••••••" required>
         </div>
         <button class="btn btn-primary w-100">Login</button>
       </form>
-      <p class="mt-3 mb-0">No account? <a href="register.php">Create one</a></p>
+      <p class="mt-4 mb-0 text-center">No account yet? <a href="register.php">Create one</a></p>
     </div>
   </div>
-  <div class="col-12 text-center mt-3">
-    <span class="badge badge-accent px-3 py-2">Safe, simple, and joyful shopping ✨</span>
-  </div>
-  </div>
+</section>
+
 <?php include __DIR__ . '/templates/footer.php'; ?>

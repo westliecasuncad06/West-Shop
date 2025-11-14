@@ -1,8 +1,52 @@
-</div>
-<footer class="py-4 mt-5 border-top bg-white">
-  <div class="container d-flex justify-content-between align-items-center">
-    <span class="text-muted">© <?php echo date('Y'); ?> <?php echo e(APP_NAME); ?></span>
-    <span class="text-muted">Made with ❤️ and pastel vibes</span>
+ </main>
+<footer class="site-footer mt-5">
+  <div class="container">
+    <div class="row g-4">
+      <div class="col-lg-4">
+        <a class="footer-brand" href="<?php echo e(base_url('index.php')); ?>"><?php echo e(APP_NAME); ?></a>
+        <p class="text-muted mb-3">A curated marketplace connecting inspired sellers to thoughtful buyers. Shop confidently with transparent policies and real human support.</p>
+        <div class="d-flex gap-3">
+          <span class="social-pill"><i class="bi bi-facebook"></i></span>
+          <span class="social-pill"><i class="bi bi-instagram"></i></span>
+          <span class="social-pill"><i class="bi bi-twitter-x"></i></span>
+        </div>
+      </div>
+      <div class="col-6 col-lg-2">
+        <h6 class="footer-heading">Marketplace</h6>
+        <ul class="list-unstyled footer-links">
+          <li><a href="<?php echo e(base_url('index.php')); ?>">Browse</a></li>
+          <li><a href="<?php echo e(base_url('buyer/cart.php')); ?>">Cart</a></li>
+          <li><a href="<?php echo e(base_url('buyer/orders.php')); ?>">Orders</a></li>
+          <li><a href="<?php echo e(base_url('seller/store_public.php?seller_id=1')); ?>">Stores</a></li>
+        </ul>
+      </div>
+      <div class="col-6 col-lg-2">
+        <h6 class="footer-heading">Sellers</h6>
+        <ul class="list-unstyled footer-links">
+          <li><a href="<?php echo e(base_url('seller/index.php')); ?>">Dashboard</a></li>
+          <li><a href="<?php echo e(base_url('seller/orders.php')); ?>">Orders</a></li>
+          <li><a href="<?php echo e(base_url('seller/chat_admin.php')); ?>">Support</a></li>
+          <li><a href="<?php echo e(base_url('seller/index.php?preview=1')); ?>">Buyer Preview</a></li>
+        </ul>
+      </div>
+      <div class="col-lg-4">
+        <h6 class="footer-heading">Stay in the loop</h6>
+        <p class="text-muted">Monthly design inspo, seller spotlights, and product drops straight to your inbox.</p>
+        <form class="footer-form">
+          <input type="email" class="form-control" placeholder="Email address">
+          <button class="btn btn-primary w-100 mt-2">Subscribe</button>
+        </form>
+      </div>
+    </div>
+    <hr class="my-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-center small text-muted">
+      <span>© <?php echo date('Y'); ?> <?php echo e(APP_NAME); ?> · All rights reserved.</span>
+      <div class="d-flex gap-3">
+        <a href="#" class="text-muted text-decoration-none">Privacy</a>
+        <a href="#" class="text-muted text-decoration-none">Terms</a>
+        <a href="mailto:support@example.com" class="text-muted text-decoration-none">support@example.com</a>
+      </div>
+    </div>
   </div>
 </footer>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>

@@ -55,7 +55,7 @@
 <script>
 (function(){
   const notifBadge = document.querySelector('[data-notif-count]');
-  const chatBadge = document.querySelector('[data-chat-count]');
+  const chatBadges = Array.from(document.querySelectorAll('[data-chat-count]'));
   const pulseEndpoint = '<?php echo e(base_url('public/pulse_counts.php')); ?>';
   if(!pulseEndpoint) return;
   const updateBadge = (el, value) => {
@@ -77,7 +77,14 @@
           updateBadge(notifBadge, data.notifications);
         }
         if(typeof data.chat !== 'undefined') {
-          updateBadge(chatBadge, data.chat);
+          // update all chat badges on page
+          chatBadges.forEach(b => updateBadge(b, data.chat));
+          // small pulse to indicate new message (CSS animation)
+          if(window.lastChatCount !== undefined && Number(data.chat) > Number(window.lastChatCount)) {
+            chatBadges.forEach(b => b.classList.add('pulse'));
+            setTimeout(()=> chatBadges.forEach(b => b.classList.remove('pulse')), 900);
+          }
+          window.lastChatCount = Number(data.chat);
         }
       }
     } catch (err) {

@@ -131,16 +131,17 @@ include __DIR__ . '/../templates/header.php';
 
   const updateBadges = (payload) => {
     if(!payload || typeof payload !== 'object') return;
-    const chatBadge = document.querySelector('[data-chat-count]');
-    if(chatBadge) {
-      const total = Number(payload.primary ?? payload.chat ?? 0);
-      if(total > 0) {
-        chatBadge.textContent = total;
-        chatBadge.classList.remove('d-none');
-      } else {
-        chatBadge.classList.add('d-none');
-      }
+    const total = Number(payload.primary ?? payload.chat ?? 0);
+    const chatBadges = Array.from(document.querySelectorAll('[data-chat-count]'));
+    chatBadges.forEach((chatBadge) => {
+      if(total > 0) { chatBadge.textContent = total; chatBadge.classList.remove('d-none'); }
+      else { chatBadge.classList.add('d-none'); }
+    });
+    if(window._lastChatCount !== undefined && total > Number(window._lastChatCount)) {
+      chatBadges.forEach(b => b.classList.add('pulse'));
+      setTimeout(()=> chatBadges.forEach(b => b.classList.remove('pulse')), 900);
     }
+    window._lastChatCount = total;
   };
 
   const poll = async () => {

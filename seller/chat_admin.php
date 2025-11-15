@@ -101,19 +101,19 @@ include __DIR__ . '/../templates/header.php';
       scrollToBottom();
     };
 
-    const updateBadges = (badges) => {
-      if (!badges || typeof badges !== 'object') return;
-      const primaryCount = Number(badges.primary ?? badges.chat ?? 0);
-      const chatBadge = document.querySelector('[data-chat-count]');
-      if (chatBadge) {
-        if (primaryCount > 0) {
-          chatBadge.textContent = primaryCount;
-          chatBadge.classList.remove('d-none');
-        } else {
-          chatBadge.classList.add('d-none');
+      const updateBadges = (badges) => {
+        const total = Number(badges.primary ?? badges.chat ?? 0);
+        const chatBadges = Array.from(document.querySelectorAll('[data-chat-count]'));
+        chatBadges.forEach((chatBadge) => {
+          if(total > 0) { chatBadge.textContent = total; chatBadge.classList.remove('d-none'); }
+          else { chatBadge.classList.add('d-none'); }
+        });
+        if(window._lastChatCount !== undefined && total > Number(window._lastChatCount)) {
+          chatBadges.forEach(b => b.classList.add('pulse'));
+          setTimeout(()=> chatBadges.forEach(b => b.classList.remove('pulse')), 900);
         }
-      }
-    };
+        window._lastChatCount = total;
+      };
 
     const poll = async () => {
       try {

@@ -150,31 +150,43 @@ $mainNavItems = [
   </nav>
 </header>
 <?php if($u): ?>
-  <div class="floating-chat dropup">
-    <button class="floating-chat-btn shadow-lg" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Open messages">
-      <i class="bi bi-chat-dots"></i>
-      <span>Messages</span>
-      <?php if($primaryChatCount>0): ?><span class="floating-badge" data-chat-count><?php echo $primaryChatCount; ?></span><?php endif; ?>
-    </button>
-    <ul class="dropdown-menu dropdown-menu-end floating-chat-menu shadow-lg">
-      <li>
-        <a class="dropdown-item" href="<?php echo e(base_url($chatHubLink)); ?>">
-          <div class="d-flex flex-column">
-            <strong>Buyer Messages</strong>
-            <small class="text-muted">Talk to customers</small>
-          </div>
-        </a>
-      </li>
-      <li>
-        <a class="dropdown-item" href="<?php echo e(base_url($supportLink)); ?>">
-          <div class="d-flex flex-column">
-            <strong>Support Chat</strong>
-            <small class="text-muted">Reach the help desk</small>
-          </div>
-        </a>
-      </li>
-    </ul>
-  </div>
+  <?php if($u['role'] === 'buyer'): ?>
+    <div class="floating-chat">
+      <a class="floating-chat-btn shadow-lg" href="<?php echo e(base_url($chatHubLink)); ?>" title="Open messages">
+        <i class="bi bi-chat-dots"></i>
+        <span>Messages</span>
+        <?php if($primaryChatCount>0): ?><span class="floating-badge" data-chat-count><?php echo $primaryChatCount; ?></span><?php endif; ?>
+      </a>
+    </div>
+  <?php else: ?>
+    <div class="floating-chat dropup">
+      <button class="floating-chat-btn shadow-lg" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="Open messages">
+        <i class="bi bi-chat-dots"></i>
+        <span>Messages</span>
+        <?php if($primaryChatCount>0): ?><span class="floating-badge" data-chat-count><?php echo $primaryChatCount; ?></span><?php endif; ?>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end floating-chat-menu shadow-lg">
+        <li>
+          <a class="dropdown-item" href="<?php echo e(base_url($chatHubLink)); ?>">
+            <div class="d-flex flex-column">
+              <strong>Buyer Messages</strong>
+              <small class="text-muted">Talk to customers</small>
+            </div>
+          </a>
+        </li>
+        <?php if($u && $u['role'] !== 'buyer'): ?>
+        <li>
+          <a class="dropdown-item" href="<?php echo e(base_url($supportLink)); ?>">
+            <div class="d-flex flex-column">
+              <strong>Support Chat</strong>
+              <small class="text-muted">Reach the help desk</small>
+            </div>
+          </a>
+        </li>
+        <?php endif; ?>
+      </ul>
+    </div>
+  <?php endif; ?>
 <?php endif; ?>
 <main class="page-shell container py-4">
 <?php if($f = get_flash()): ?>

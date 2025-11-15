@@ -410,19 +410,29 @@ function store_reviews_has_updated_at(): bool {
     return $has;
 }
 
-// Generic column presence check for store_reviews
-function store_reviews_has_column(string $name): bool {
+// Generic column presence helper with caching to avoid repeated schema checks
+function table_has_column(string $table, string $column): bool {
     static $cache = [];
-    if (array_key_exists($name, $cache)) return $cache[$name];
+    $key = strtolower($table) . '.' . strtolower($column);
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
     global $pdo;
     try {
-        $stmt = $pdo->prepare("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name='store_reviews' AND column_name = ? LIMIT 1");
-        $stmt->execute([$name]);
-        $cache[$name] = (bool)$stmt->fetchColumn();
+        $stmt = $pdo->prepare(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1"
+        );
+        $stmt->execute([$table, $column]);
+        $cache[$key] = (bool)$stmt->fetchColumn();
     } catch (Exception $e) {
-        $cache[$name] = false;
+        $cache[$key] = false;
     }
-    return $cache[$name];
+    return $cache[$key];
+}
+
+// Backwards compatibility helper dedicated to store_reviews table
+function store_reviews_has_column(string $name): bool {
+    return table_has_column('store_reviews', $name);
 }
 
 // Detect whether store reviews reference a store record or the legacy seller id

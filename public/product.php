@@ -25,6 +25,24 @@ $storeRating = $sellerId ? get_store_rating($sellerId) : ['avg'=>0,'cnt'=>0];
 $productRating = (float) get_product_rating((int)$p['product_id']);
 $reviews = get_reviews((int)$p['product_id']);
 $reviewsCount = count($reviews);
+$suggestedProducts = [];
+if ($sellerId) {
+  $orderColumn = table_has_column('products', 'updated_at') ? 'updated_at' : 'product_id';
+  $sql = 'SELECT product_id, name, price, image FROM products WHERE seller_id = ? AND product_id <> ? ORDER BY ' . $orderColumn . ' DESC LIMIT 4';
+  try {
+    $suggestStmt = $pdo->prepare($sql);
+    $suggestStmt->execute([$sellerId, $p['product_id']]);
+    $suggestedProducts = $suggestStmt->fetchAll(PDO::FETCH_ASSOC);
+  } catch (PDOException $e) {
+    if ($orderColumn !== 'product_id') {
+      $fallback = $pdo->prepare('SELECT product_id, name, price, image FROM products WHERE seller_id = ? AND product_id <> ? ORDER BY product_id DESC LIMIT 4');
+      $fallback->execute([$sellerId, $p['product_id']]);
+      $suggestedProducts = $fallback->fetchAll(PDO::FETCH_ASSOC);
+    } else {
+      throw $e;
+    }
+  }
+}
 $activeUser = $_SESSION['user'] ?? null;
 $userRole = $activeUser['role'] ?? null;
 $isBuyer = $userRole === 'buyer';
@@ -127,7 +145,7 @@ include __DIR__ . '/../templates/header.php';
 <div class="row g-4 align-items-start">
   <div class="col-lg-6">
     <div class="product-gallery position-relative">
-      <img src="<?php echo e(product_image_src($p['image'] ?? null, 'https://via.placeholder.com/700x520?text=Product')); ?>" alt="<?php echo e($p['name']); ?> visual">
+      <img src="<?php echo e(product_image_src($p['image'] ?? null, 'https://via.placeholder.com/700x520?text=Product')); ?>" class="img-fluid" alt="<?php echo e($p['name']); ?> visual">
     </div>
   </div>
   <div class="col-lg-6">
@@ -233,6 +251,47 @@ include __DIR__ . '/../templates/header.php';
     </div>
   </div>
 </div>
+
+<?php if($suggestedProducts): ?>
+<section class="section-shell mt-5">
+  <div class="section-heading">
+    <div>
+      <p class="section-heading__eyebrow mb-1">More from this shop</p>
+      <h3 class="section-heading__title mb-0">Suggested products</h3>
+    </div>
+    <?php if($sellerId): ?>
+      <div class="section-heading__actions">
+        <a href="<?php echo e(base_url('seller/store_public.php?seller_id=' . (int)$sellerId)); ?>" class="pill-link">
+          <i class="bi bi-shop"></i> Visit store
+        </a>
+      </div>
+    <?php endif; ?>
+  </div>
+  <div class="row g-4">
+    <?php foreach($suggestedProducts as $sp): ?>
+      <div class="col-6 col-md-4 col-lg-3 col-xl-2">
+        <a href="<?php echo e(base_url('public/product.php?id=' . (int)$sp['product_id'])); ?>" class="text-decoration-none text-reset d-block h-100">
+          <div class="card product-card h-100">
+            <div class="position-relative">
+              <img src="<?php echo e(product_image_src($sp['image'] ?? null)); ?>" class="img-fluid w-100" alt="<?php echo e($sp['name']); ?>">
+            </div>
+            <div class="p-3">
+              <span class="badge-chip mb-2">Same shop pick</span>
+              <h6 class="fw-semibold mb-2" style="min-height:2.5rem;line-height:1.25rem;">
+                <?php echo e($sp['name']); ?>
+              </h6>
+              <div class="d-flex justify-content-between align-items-center">
+                <span class="text-primary fw-bold">$<?php echo number_format((float)$sp['price'], 2); ?></span>
+                <span class="text-muted small"><i class="bi bi-arrow-up-right"></i></span>
+              </div>
+            </div>
+          </div>
+        </a>
+      </div>
+    <?php endforeach; ?>
+  </div>
+</section>
+<?php endif; ?>
 
 <section class="mt-5" id="reviews">
   <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">

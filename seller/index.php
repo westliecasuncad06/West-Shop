@@ -286,6 +286,16 @@ foreach ($allCats as $cat) {
   $categoryNamesById[(int)$cat['category_id']] = $cat['name'];
 }
 
+$sellerCurrentPath = trim(parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH), '/');
+$sellerSidebarLinks = [
+  ['label' => 'Overview', 'href' => base_url('seller/index.php'), 'icon' => 'bi-speedometer2', 'match' => 'seller/index.php'],
+  ['label' => 'Orders', 'href' => base_url('seller/orders.php'), 'icon' => 'bi-bag-check', 'badge' => $soldCount, 'match' => 'seller/orders.php'],
+  ['label' => 'Products', 'href' => base_url('seller/products.php'), 'icon' => 'bi-box-seam', 'badge' => $prodCount, 'match' => 'seller/products.php'],
+  // 'Store Profile' removed from seller dashboard menu per request
+  ['label' => 'Buyer Messages', 'href' => base_url('seller/chat.php'), 'icon' => 'bi-chat-dots', 'match' => 'seller/chat.php'],
+  ['label' => 'Support Chat', 'href' => base_url('seller/chat_admin.php'), 'icon' => 'bi-headset', 'match' => 'seller/chat_admin.php']
+];
+
 // Load products with optional search/category filters (for seller dashboard)
 $params = [$u['user_id']];
 $sql = 'SELECT * FROM products WHERE seller_id = ?';
@@ -377,8 +387,37 @@ include __DIR__ . '/../templates/header.php';
     include __DIR__ . '/partials/storefront_view.php';
   ?>
 <?php else: ?>
-  <div class="seller-shell">
-    <section class="seller-hero card border-0 p-4 p-lg-5">
+  <div class="dashboard-shell seller-dashboard-shell">
+    <div class="dashboard-shell__sidebar">
+      <div class="dashboard-shell__sidebar-trigger d-lg-none">
+        <button class="btn btn-outline-primary w-100 mb-3" type="button" data-bs-toggle="offcanvas" data-bs-target="#sellerSidebarNav" aria-controls="sellerSidebarNav">
+          <i class="bi bi-sliders me-2"></i> Seller menu
+        </button>
+      </div>
+      <div class="offcanvas offcanvas-start offcanvas-lg dashboard-offcanvas" tabindex="-1" id="sellerSidebarNav" aria-labelledby="sellerSidebarNavLabel">
+        <div class="offcanvas-header">
+          <h5 class="offcanvas-title" id="sellerSidebarNavLabel">Seller navigation</h5>
+          <button type="button" class="btn-close text-reset" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        </div>
+        <div class="offcanvas-body">
+          <nav class="dashboard-menu">
+            <?php foreach ($sellerSidebarLinks as $item): ?>
+              <?php
+                $isActive = $sellerCurrentPath === trim($item['match'], '/');
+                $linkClass = trim('dashboard-menu__link ' . ($isActive ? 'active' : ''));
+              ?>
+              <a href="<?php echo e($item['href']); ?>" class="<?php echo e($linkClass); ?>">
+                <span><i class="bi <?php echo e($item['icon']); ?> me-2"></i><?php echo e($item['label']); ?></span>
+                <?php if (array_key_exists('badge', $item)): ?><span class="badge bg-light text-dark"><?php echo (int)$item['badge']; ?></span><?php endif; ?>
+              </a>
+            <?php endforeach; ?>
+          </nav>
+        </div>
+      </div>
+    </div>
+    <div class="dashboard-shell__content">
+      <div class="seller-shell">
+    <section class="seller-hero card border-0 p-4 p-lg-5 dashboard-header">
       <div class="row align-items-center g-4">
         <div class="col-lg-7">
           <div class="d-flex align-items-center gap-3 mb-3">
@@ -391,7 +430,7 @@ include __DIR__ . '/../templates/header.php';
           <p class="text-muted mb-4">
             <?php echo e($profile['description'] ?: 'Add a short store story so buyers instantly get your vibe.'); ?>
           </p>
-          <div class="d-flex flex-wrap gap-2">
+          <div class="hero-actions d-flex flex-wrap gap-2">
             <a class="pill-button pill-button--mint" href="<?php echo e(base_url('seller/index.php?preview=1')); ?>">Buyer View</a>
             <a class="pill-button pill-button--ghost" href="<?php echo e(base_url('seller/products.php')); ?>">Manage Products</a>
           </div>
@@ -780,8 +819,10 @@ include __DIR__ . '/../templates/header.php';
           <?php endif; ?>
         </div>
       </section>
-    </div>
-  </div>
+    </div><!-- /.seller-content-grid -->
+  </div><!-- /.seller-shell -->
+    </div><!-- /.dashboard-shell__content -->
+  </div><!-- /.dashboard-shell -->
 <?php endif; ?>
 
 <?php include __DIR__ . '/../templates/footer.php'; ?>

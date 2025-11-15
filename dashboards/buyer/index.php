@@ -44,7 +44,7 @@ include __DIR__ . '/../../templates/header.php';
 </section>
 
 <section class="section-shell">
-  <div class="section-heading">
+  <div class="section-heading dashboard-header">
     <div>
       <p class="section-heading__eyebrow mb-1">Overview</p>
       <h3 class="section-heading__title mb-0">Snapshot of your activity</h3>

@@ -159,10 +159,10 @@ $categoryCount = count($topCategories);
 
 <div class="row g-4">
   <?php foreach($allProducts as $p): ?>
-    <div class="col-6 col-md-4 col-lg-3">
+    <div class="col-6 col-md-4 col-lg-3 col-xl-2">
       <div class="card product-card h-100">
         <div class="position-relative">
-          <img src="<?php echo e(product_image_src($p['image'] ?? null)); ?>" class="w-100" alt="<?php echo e($p['name']); ?>">
+          <img src="<?php echo e(product_image_src($p['image'] ?? null)); ?>" class="img-fluid w-100" alt="<?php echo e($p['name']); ?>">
           <?php if(isset($p['stock']) && (int)$p['stock'] < 10 && (int)$p['stock'] > 0): ?>
             <span class="position-absolute top-0 end-0 m-2 badge badge-rose">
               <i class="bi bi-lightning-fill"></i> Low stock
@@ -175,14 +175,11 @@ $categoryCount = count($topCategories);
             <span class="text-muted-soft small">#<?php echo (int)$p['product_id']; ?></span>
           </div>
           <h6 class="fw-semibold mb-3" style="min-height:2.5rem;line-height:1.25rem;"><?php echo e($p['name']); ?></h6>
-          <div class="d-flex justify-content-between align-items-center">
+            <div class="d-flex justify-content-between align-items-center">
             <div>
               <p class="text-muted-soft mb-1 small">Price</p>
               <div class="text-primary fw-bold fs-5">$<?php echo number_format((float)$p['price'],2); ?></div>
             </div>
-            <a href="<?php echo e(base_url('public/product.php?id='.(int)$p['product_id'])); ?>" class="pill-button pill-button--ghost text-decoration-none">
-              <i class="bi bi-eye"></i> View
-            </a>
           </div>
         </div>
         <a href="<?php echo e(base_url('public/product.php?id='.(int)$p['product_id'])); ?>" class="stretched-link" aria-label="Open product"></a>

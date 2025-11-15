@@ -179,11 +179,11 @@ $showBuyerActions = ($storeViewMode === 'buyer' && $isBuyer);
 
     <div class="row g-3">
       <?php foreach ($products as $prod): ?>
-        <div class="col-sm-6 col-lg-4">
+        <div class="col-6 col-md-4 col-lg-3 col-xl-2">
           <a href="<?php echo e(base_url('public/product.php?id=' . (int)$prod['product_id'])); ?>" class="text-decoration-none text-reset d-block h-100">
             <div class="card border-0 shadow-sm h-100 product-card">
               <div class="product-card__image">
-                <img src="<?php echo e($prod['image'] ?: base_url('assets/images/products/placeholder.png')); ?>" alt="<?php echo e($prod['name']); ?>">
+                <img src="<?php echo e($prod['image'] ?: base_url('assets/images/products/placeholder.png')); ?>" class="img-fluid" alt="<?php echo e($prod['name']); ?>">
               </div>
               <div class="card-body">
                 <p class="text-uppercase small text-muted mb-1">Featured item</p>

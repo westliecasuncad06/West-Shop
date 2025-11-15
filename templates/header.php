@@ -80,18 +80,28 @@ $mainNavItems = [
           </ul>
           <div class="nav-utility">
             <div class="nav-search-shell">
-              <form class="nav-search nav-search-inline nav-search-modern d-flex flex-column flex-lg-row align-items-stretch" action="<?php echo e(base_url('public/search.php')); ?>" method="get">
-                <div class="nav-search-field nav-search-pill d-flex flex-column flex-md-row flex-grow-1">
-                  <div class="nav-search-chip d-flex align-items-center gap-2">
-                    <i class="bi bi-ui-checks-grid text-primary"></i>
-                    <select name="type" class="form-select form-select-sm nav-search-type">
-                      <option value="products" <?php echo $globalSearchType==='products'?'selected':''; ?>>Products</option>
-                      <option value="stores" <?php echo $globalSearchType==='stores'?'selected':''; ?>>Stores</option>
-                    </select>
+              <form class="nova-search" action="<?php echo e(base_url('public/search.php')); ?>" method="get">
+                <div class="nova-search__glass">
+                  <div class="nova-search__chip">
+                    <div class="nova-search__chip-body">
+                      <small>Scope</small>
+                      <select name="type" class="nova-search__select">
+                        <option value="products" <?php echo $globalSearchType==='products'?'selected':''; ?>>Products</option>
+                        <option value="stores" <?php echo $globalSearchType==='stores'?'selected':''; ?>>Stores</option>
+                      </select>
+                    </div>
+                    <i class="bi bi-chevron-expand"></i>
                   </div>
-                  <div class="nav-search-input-wrap flex-grow-1">
-                    <i class="bi bi-search text-muted"></i>
-                    <input type="search" name="q" class="form-control form-control-sm nav-search-input" placeholder="Find products, stores, or categories" value="<?php echo e($globalSearchTerm); ?>">
+                  <div class="nova-search__divider"></div>
+                  <div class="nova-search__input">
+                    <i class="bi bi-search"></i>
+                    <input type="search" name="q" class="nova-search__control" placeholder="Search collections, makers, or SKUs" value="<?php echo e($globalSearchTerm); ?>" autocomplete="off">
+                  </div>
+                  <div class="nova-search__actions">
+                    <button type="submit" class="nova-search__submit">
+                      <span>Go</span>
+                      <i class="bi bi-arrow-up-right"></i>
+                    </button>
                   </div>
                 </div>
               </form>

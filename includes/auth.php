@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/functions.php';
 
 function is_logged_in(): bool {
     return isset($_SESSION['user']);
@@ -20,9 +21,24 @@ function require_role(string $role): void {
     require_login();
     $u = current_user();
     if (!$u || $u['role'] !== $role) {
-        http_response_code(403);
-        echo 'Forbidden';
-        exit;
+        $fallback = 'index.php';
+        if ($u) {
+            switch ($u['role']) {
+                case 'seller':
+                    $fallback = 'seller/index.php';
+                    break;
+                case 'buyer':
+                    $fallback = 'dashboards/buyer/index.php';
+                    break;
+                case 'admin':
+                    $fallback = 'dashboards/admin/index.php';
+                    break;
+            }
+        } else {
+            $fallback = 'login.php';
+        }
+        set_flash('warning', 'You do not have access to that area.');
+        redirect($fallback);
     }
 }
 

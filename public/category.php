@@ -20,14 +20,13 @@ if ($cat) {
 
 <div class="row g-3">
   <?php foreach($products as $p): ?>
-    <div class="col-6 col-md-4 col-lg-3">
+    <div class="col-6 col-md-4 col-lg-3 col-xl-2">
       <div class="card product-card h-100">
-        <img src="<?php echo e(product_image_src($p['image'] ?? null)); ?>" class="w-100" alt="">
+        <img src="<?php echo e(product_image_src($p['image'] ?? null)); ?>" class="img-fluid w-100" alt="">
         <div class="p-3">
           <div class="fw-semibold"><?php echo e($p['name']); ?></div>
           <div class="d-flex justify-content-between align-items-center">
             <div class="fw-bold">$<?php echo number_format((float)$p['price'],2); ?></div>
-            <a href="<?php echo e(base_url('public/product.php?id='.(int)$p['product_id'])); ?>" class="btn btn-sm btn-outline-primary">View</a>
           </div>
         </div>
         <a href="<?php echo e(base_url('public/product.php?id='.(int)$p['product_id'])); ?>" class="stretched-link" aria-label="Open product"></a>

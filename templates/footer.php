@@ -1,4 +1,8 @@
  </main>
+<?php
+$footerUser = $u ?? (function_exists('current_user') ? current_user() : null);
+$footerIsSeller = $footerUser && ($footerUser['role'] === 'seller');
+?>
 <footer class="site-footer mt-5">
   <div class="container">
     <div class="row g-4">
@@ -21,13 +25,20 @@
         </ul>
       </div>
       <div class="col-6 col-lg-2">
-        <h6 class="footer-heading">Sellers</h6>
-        <ul class="list-unstyled footer-links">
-          <li><a href="<?php echo e(base_url('seller/index.php')); ?>">Dashboard</a></li>
-          <li><a href="<?php echo e(base_url('seller/orders.php')); ?>">Orders</a></li>
-          <li><a href="<?php echo e(base_url('seller/chat_admin.php')); ?>">Support</a></li>
-          <li><a href="<?php echo e(base_url('seller/index.php?preview=1')); ?>">Buyer Preview</a></li>
-        </ul>
+        <?php if($footerIsSeller): ?>
+          <h6 class="footer-heading">Seller Hub</h6>
+          <ul class="list-unstyled footer-links">
+            <li><a href="<?php echo e(base_url('seller/index.php')); ?>">Dashboard</a></li>
+            <li><a href="<?php echo e(base_url('seller/orders.php')); ?>">Orders</a></li>
+            <li><a href="<?php echo e(base_url('seller/products.php')); ?>">Catalog</a></li>
+            <li><a href="<?php echo e(base_url('seller/chat_admin.php')); ?>">Support Chat</a></li>
+          </ul>
+        <?php else: ?>
+          <h6 class="footer-heading">Sell on <?php echo e(APP_NAME); ?></h6>
+          <p class="text-muted small">Open a curated storefront and unlock concierge support built for emerging brands.</p>
+          <a class="btn btn-sm btn-outline-primary w-100" href="<?php echo e(base_url('register.php?role=seller')); ?>">Become a seller</a>
+          <small class="d-block text-muted mt-2">Already approved? <a href="<?php echo e(base_url('login.php')); ?>" class="text-decoration-none">Sign in</a></small>
+        <?php endif; ?>
       </div>
       <div class="col-lg-4">
         <h6 class="footer-heading">Stay in the loop</h6>

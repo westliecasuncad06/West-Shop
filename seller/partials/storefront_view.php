@@ -9,8 +9,18 @@ $products = $products ?? [];
 $activeCoupons = $activeCoupons ?? [];
 $storeReviews = $storeReviews ?? [];
 $existingStoreReview = $existingStoreReview ?? null;
-$bannerImage = ($store['banner'] ?? null) ? base_url($store['banner']) : base_url('assets/images/products/placeholder.png');
-$logoImage = ($store['logo'] ?? null) ? base_url($store['logo']) : base_url('assets/images/products/placeholder.png');
+$storeImagePlaceholder = base_url('assets/images/products/placeholder.png');
+$resolveStoreImage = function (?string $path) use ($storeImagePlaceholder) {
+  if (!$path) {
+    return $storeImagePlaceholder;
+  }
+  if (preg_match('/^https?:\/\//i', $path)) {
+    return $path;
+  }
+  return base_url(ltrim($path, '/'));
+};
+$bannerImage = $resolveStoreImage($store['banner'] ?? null);
+$logoImage = $resolveStoreImage($store['logo'] ?? null);
 $productCount = $productCount ?? count($products);
 $sellerRefId = $seller_id ?? ($store['seller_id'] ?? null);
 $contactUrl = $sellerRefId ? base_url('buyer/chat.php?to=' . (int)$sellerRefId) : '#';

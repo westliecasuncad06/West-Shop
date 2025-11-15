@@ -1,7 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/functions.php';
-include __DIR__ . '/../templates/header.php';
 
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $stmt = $pdo->prepare('SELECT p.*, u.name AS seller_name, c.name AS category_name
@@ -13,6 +12,7 @@ $stmt->execute([$id]);
 $p = $stmt->fetch();
 
 if (!$p) {
+  include __DIR__ . '/../templates/header.php';
   echo '<div class="alert alert-warning">Product not found.</div>';
   include __DIR__ . '/../templates/footer.php';
   exit;
@@ -25,6 +25,10 @@ $storeRating = $sellerId ? get_store_rating($sellerId) : ['avg'=>0,'cnt'=>0];
 $productRating = (float) get_product_rating((int)$p['product_id']);
 $reviews = get_reviews((int)$p['product_id']);
 $reviewsCount = count($reviews);
+$activeUser = $_SESSION['user'] ?? null;
+$userRole = $activeUser['role'] ?? null;
+$isBuyer = $userRole === 'buyer';
+$isSellerOrAdmin = in_array($userRole, ['seller','admin'], true);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   if (!csrf_verify()) { http_response_code(400); exit('Bad CSRF'); }
@@ -109,6 +113,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect('public/product.php?id=' . $p['product_id']);
   }
 }
+
+include __DIR__ . '/../templates/header.php';
 ?>
 
 <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
@@ -146,9 +152,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <input type="hidden" name="action" value="add">
         <label class="fw-semibold small text-uppercase">Quantity</label>
         <div class="qty-input-group d-inline-flex align-items-center gap-2">
-          <input type="number" name="qty" min="1" value="1" class="form-control" aria-label="Quantity">
+          <input type="number" name="qty" min="1" value="1" class="form-control" aria-label="Quantity" <?php echo $isSellerOrAdmin ? 'disabled' : ''; ?>>
         </div>
-        <button type="submit" class="btn btn-primary btn-lg w-100" id="addToCartBtn">Add to cart</button>
+        <button type="submit" class="btn btn-primary btn-lg w-100" id="addToCartBtn" <?php echo $isSellerOrAdmin ? 'disabled aria-disabled="true"' : ''; ?>>Add to cart</button>
+        <?php if($isSellerOrAdmin): ?>
+          <div class="alert alert-warning small mb-0" role="alert">
+            You're currently logged in as a <?php echo e($userRole); ?>. Please switch to a buyer account to place orders.
+          </div>
+        <?php endif; ?>
         <div class="small text-muted text-center">Secure checkout powered by West Shop Pay</div>
       </form>
 
@@ -286,7 +297,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <div class="text-muted mt-4">Only buyers can leave reviews. Please <a href="<?php echo e(base_url('login.php')); ?>">login</a> or create an account.</div>
 <?php endif; ?>
 
-<?php if(!isset($_SESSION['user']) || $_SESSION['user']['role'] !== 'buyer'): ?>
+<?php if(!isset($_SESSION['user'])): ?>
 <!-- Login Modal -->
 <div class="modal fade" id="loginModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">

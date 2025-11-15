@@ -53,6 +53,73 @@ function search_products(?string $term, ?int $topCategoryId, ?int $subCategoryId
     return $stmt->fetchAll();
 }
 
+function search_stores(?string $term, int $limit = 48): array {
+    global $pdo;
+    $limit = max(1, min(200, $limit));
+    $term = $term ? trim($term) : null;
+
+    $queryWithStores = 'SELECT s.store_id, s.seller_id, s.store_name, s.logo, s.banner, s.description,
+            u.name AS seller_name, COALESCE(sf.follower_total, 0) AS follower_total
+        FROM stores s
+        LEFT JOIN users u ON u.user_id = s.seller_id
+        LEFT JOIN (
+            SELECT seller_id, COUNT(*) AS follower_total
+            FROM store_follows
+            GROUP BY seller_id
+        ) sf ON sf.seller_id = s.seller_id
+        WHERE 1=1';
+
+    $queryWithProfiles = 'SELECT NULL AS store_id, sp.seller_id, sp.shop_name AS store_name, sp.logo, sp.banner, sp.description,
+            u.name AS seller_name, COALESCE(sf.follower_total, 0) AS follower_total
+        FROM seller_profiles sp
+        LEFT JOIN users u ON u.user_id = sp.seller_id
+        LEFT JOIN (
+            SELECT seller_id, COUNT(*) AS follower_total
+            FROM store_follows
+            GROUP BY seller_id
+        ) sf ON sf.seller_id = sp.seller_id
+        WHERE 1=1';
+
+    $runSearch = function (string $sql, array $searchColumns) use ($pdo, $term, $limit) {
+        $params = [];
+        if ($term) {
+            $like = '%' . $term . '%';
+            $conditions = [];
+            foreach ($searchColumns as $col) {
+                $conditions[] = $col . ' LIKE ?';
+                $params[] = $like;
+            }
+            if ($conditions) {
+                $sql .= ' AND (' . implode(' OR ', $conditions) . ')';
+            }
+        }
+        $sql .= ' ORDER BY store_name ASC LIMIT ?';
+        $stmt = $pdo->prepare($sql);
+        $idx = 1;
+        foreach ($params as $value) {
+            $stmt->bindValue($idx++, $value, PDO::PARAM_STR);
+        }
+        $stmt->bindValue($idx, $limit, PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->fetchAll();
+    };
+
+    try {
+        $rows = $runSearch($queryWithStores, ['s.store_name', 's.description', 'u.name']);
+        if ($rows) {
+            return $rows;
+        }
+    } catch (Exception $e) {
+        // stores table might not exist yet, fall back below
+    }
+
+    try {
+        return $runSearch($queryWithProfiles, ['sp.shop_name', 'sp.description', 'u.name']);
+    } catch (Exception $e) {
+        return [];
+    }
+}
+
 function get_featured_products(int $limit = 8): array {
     global $pdo; $stmt = $pdo->prepare('SELECT p.*, u.name AS seller_name, c.name AS category_name
         FROM products p
@@ -80,6 +147,85 @@ function unread_notifications_count(int $userId): int {
 
 function mark_notifications_read(int $userId): void {
     global $pdo; $stmt = $pdo->prepare('UPDATE notifications SET is_read=1 WHERE user_id=?'); $stmt->execute([$userId]);
+}
+
+function chat_unread_count(int $userId): int {
+    global $pdo;
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM chat_messages WHERE receiver_id = ? AND is_read = 0');
+    $stmt->execute([$userId]);
+    return (int)$stmt->fetchColumn();
+}
+
+function chat_unread_count_by_partner_roles(int $userId, array $partnerRoles): int {
+    $roles = array_values(array_filter(array_map('strtolower', $partnerRoles), function ($role) {
+        return is_string($role) && $role !== '';
+    }));
+    if (!$roles) {
+        return chat_unread_count($userId);
+    }
+    global $pdo;
+    $placeholders = implode(',', array_fill(0, count($roles), '?'));
+    $sql = 'SELECT COUNT(*) FROM chat_messages cm
+        JOIN users u ON u.user_id = cm.sender_id
+        WHERE cm.receiver_id = ? AND cm.is_read = 0 AND u.role IN (' . $placeholders . ')';
+    $stmt = $pdo->prepare($sql);
+    $params = array_merge([$userId], $roles);
+    $stmt->execute($params);
+    return (int)$stmt->fetchColumn();
+}
+
+function chat_unread_breakdown(int $userId, string $role): array {
+    $role = strtolower($role);
+    $primaryRoles = [];
+    $supportRoles = [];
+    switch ($role) {
+        case 'seller':
+            $primaryRoles = ['buyer'];
+            $supportRoles = ['admin'];
+            break;
+        case 'buyer':
+            $primaryRoles = ['seller'];
+            $supportRoles = ['admin'];
+            break;
+        case 'admin':
+            $supportRoles = ['seller'];
+            break;
+        default:
+            $primaryRoles = [];
+            $supportRoles = [];
+            break;
+    }
+
+    $primaryCount = $primaryRoles ? chat_unread_count_by_partner_roles($userId, $primaryRoles) : 0;
+    if (!$primaryRoles && $role !== 'admin') {
+        $primaryCount = chat_unread_count($userId);
+    }
+    $supportCount = $supportRoles ? chat_unread_count_by_partner_roles($userId, $supportRoles) : 0;
+
+    return [
+        'primary' => $primaryCount,
+        'support' => $supportCount,
+    ];
+}
+
+function chat_mark_conversation_read(int $userId, int $partnerId): void {
+    global $pdo;
+    $stmt = $pdo->prepare('UPDATE chat_messages SET is_read = 1 WHERE receiver_id = ? AND sender_id = ? AND is_read = 0');
+    $stmt->execute([$userId, $partnerId]);
+}
+
+function send_chat_message(int $senderId, int $receiverId, string $message): void {
+    global $pdo;
+    $stmt = $pdo->prepare('INSERT INTO chat_messages(sender_id, receiver_id, message) VALUES (?,?,?)');
+    $stmt->execute([$senderId, $receiverId, $message]);
+}
+
+function get_user_display_name(int $userId): ?string {
+    global $pdo;
+    $stmt = $pdo->prepare('SELECT name FROM users WHERE user_id = ? LIMIT 1');
+    $stmt->execute([$userId]);
+    $name = $stmt->fetchColumn();
+    return $name ? (string)$name : null;
 }
 
 // Cart helpers (session-based)
@@ -119,6 +265,13 @@ function order_create_from_cart(int $buyerId, string $paymentMethod, ?array $cou
     $total = 0; foreach ($items as $it) { $total += $it['line_total']; }
     $discountAmount = 0.00;
     $couponCode = null;
+    $sellerIds = [];
+    foreach ($items as $it) {
+        if (!empty($it['seller_id'])) {
+            $sellerIds[] = (int)$it['seller_id'];
+        }
+    }
+    $sellerIds = array_values(array_unique(array_filter($sellerIds)));
     if ($coupon) {
         $couponCode = $coupon['code'] ?? null;
         $discountAmount = (float)($coupon['discount_amount'] ?? 0.00);
@@ -142,6 +295,11 @@ function order_create_from_cart(int $buyerId, string $paymentMethod, ?array $cou
         }
         $pdo->commit();
         cart_clear();
+        $buyerName = get_user_display_name($buyerId) ?? 'a buyer';
+        create_notification($buyerId, sprintf('Order #%d placed successfully. Current status: Pending.', $orderId));
+        foreach ($sellerIds as $sid) {
+            create_notification($sid, sprintf('New order #%d from %s contains your products. Check the Seller Portal for details.', $orderId, $buyerName));
+        }
         return $orderId;
     } catch (Exception $e) {
         $pdo->rollBack();

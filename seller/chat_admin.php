@@ -8,17 +8,6 @@ $u = current_user();
 // Find an admin to chat with (first admin)
 $adminId = (int)($pdo->query("SELECT user_id FROM users WHERE role='admin' ORDER BY user_id ASC LIMIT 1")->fetchColumn());
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!csrf_verify()) { http_response_code(400); exit('Bad CSRF'); }
-    $msg = trim($_POST['message'] ?? '');
-    if ($msg !== '' && $adminId) {
-        $stmt = $pdo->prepare('INSERT INTO chat_messages(sender_id, receiver_id, message) VALUES (?,?,?)');
-        $stmt->execute([$u['user_id'], $adminId, $msg]);
-    }
-    header('Location: '.base_url('seller/chat_admin.php'));
-    exit;
-}
-
 $conversation = [];
 if ($adminId) {
     $stmt = $pdo->prepare('SELECT * FROM chat_messages WHERE (sender_id=? AND receiver_id=?) OR (sender_id=? AND receiver_id=?) ORDER BY timestamp ASC');
@@ -60,20 +49,11 @@ include __DIR__ . '/../templates/header.php';
       </div>
     </div>
     <div class="col-lg-8 border-start">
-      <div class="chat-thread" id="chatThread">
-        <?php foreach($conversation as $m): ?>
-          <?php $isSeller = ($m['sender_id']===$u['user_id']); ?>
-          <div class="chat-message <?php echo $isSeller ? 'chat-message--self' : ''; ?>">
-            <div class="chat-bubble">
-              <div><?php echo nl2br(e($m['message'])); ?></div>
-              <span class="chat-timestamp"><?php echo date('M d, g:i A', strtotime($m['timestamp'])); ?></span>
-            </div>
-          </div>
-        <?php endforeach; ?>
-        <?php if(!$conversation): ?><div class="empty-panel">Say hello to start the conversation.</div><?php endif; ?>
-      </div>
-      <form method="post" class="chat-input-row">
+      <div class="chat-thread" id="chatThread"></div>
+      <form method="post" class="chat-input-row" action="<?php echo e(base_url('public/chat_send.php')); ?>">
         <?php echo csrf_field(); ?>
+        <input type="hidden" name="partner_id" value="<?php echo (int)$adminId; ?>">
+        <input type="hidden" name="redirect_to" value="seller/chat_admin.php">
         <input class="form-control chat-message-input" name="message" placeholder="Type your message..." required>
         <button class="btn btn-primary"><i class="bi bi-send"></i> Send</button>
       </form>
@@ -83,10 +63,115 @@ include __DIR__ . '/../templates/header.php';
 
 <script>
   (function(){
-    var thread = document.getElementById('chatThread');
-    if (thread) {
-      thread.scrollTop = thread.scrollHeight;
+    const thread = document.getElementById('chatThread');
+    if (!thread) return;
+    const endpoint = '<?php echo e(base_url('public/chat_poll.php?partner_id=' . (int)$adminId)); ?>';
+    const sendEndpoint = '<?php echo e(base_url('public/chat_send.php')); ?>';
+    const selfId = <?php echo (int)$u['user_id']; ?>;
+    let latestMessages = [];
+
+    const scrollToBottom = () => {
+      requestAnimationFrame(() => {
+        thread.scrollTop = thread.scrollHeight;
+      });
+    };
+
+    const escapeHtml = (str) => (str || '').replace(/[&<>"']/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[ch] || ch));
+
+    const renderMessages = (messages) => {
+      latestMessages = Array.isArray(messages) ? messages.slice() : [];
+      if (!Array.isArray(messages) || messages.length === 0) {
+        thread.innerHTML = '<div class="empty-panel">Say hello to start the conversation.</div>';
+        scrollToBottom();
+        return;
+      }
+      const html = messages.map(msg => {
+        const isSelf = Number(msg.sender_id) === selfId;
+        const bubbleClass = isSelf ? 'chat-message chat-message--self' : 'chat-message';
+        const safeMsg = escapeHtml(msg.message || '').replace(/\n/g,'<br>');
+        const time = escapeHtml(msg.timestamp || '');
+        return `<div class="${bubbleClass}">
+          <div class="chat-bubble">
+            <div>${safeMsg}</div>
+            <span class="chat-timestamp">${time}</span>
+          </div>
+        </div>`;
+      }).join('');
+      thread.innerHTML = html;
+      scrollToBottom();
+    };
+
+    const updateBadges = (badges) => {
+      if (!badges || typeof badges !== 'object') return;
+      const primaryCount = Number(badges.primary ?? badges.chat ?? 0);
+      const chatBadge = document.querySelector('[data-chat-count]');
+      if (chatBadge) {
+        if (primaryCount > 0) {
+          chatBadge.textContent = primaryCount;
+          chatBadge.classList.remove('d-none');
+        } else {
+          chatBadge.classList.add('d-none');
+        }
+      }
+    };
+
+    const poll = async () => {
+      try {
+        const res = await fetch(endpoint, {credentials: 'same-origin'});
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && Array.isArray(data.messages)) {
+          renderMessages(data.messages);
+        }
+        if (data && data.chat_badges) {
+          updateBadges(data.chat_badges);
+        }
+      } catch (err) {
+        console.error('Support chat poll error', err);
+      }
+    };
+
+    const form = document.querySelector('.chat-input-row');
+    if (form) {
+      const messageInput = form.querySelector('.chat-message-input');
+      const tokenInput = form.querySelector('input[name="_token"]');
+      const partnerInput = form.querySelector('input[name="partner_id"]');
+      form.addEventListener('submit', async (evt) => {
+        evt.preventDefault();
+        if (!messageInput || !tokenInput || !partnerInput) return;
+        const text = messageInput.value.trim();
+        if (text === '') return;
+        const fd = new FormData();
+        fd.append('_token', tokenInput.value);
+        fd.append('partner_id', partnerInput.value || '<?php echo (int)$adminId; ?>');
+        fd.append('message', text);
+        fd.append('redirect_to', 'seller/chat_admin.php');
+        try {
+          const res = await fetch(sendEndpoint, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'X-Requested-With': 'XMLHttpRequest'},
+            body: fd,
+          });
+          if (!res.ok) throw new Error('Failed to send');
+          const data = await res.json();
+          if (data && data.success && data.message) {
+            messageInput.value = '';
+            const nextMessages = latestMessages.slice();
+            nextMessages.push(data.message);
+            renderMessages(nextMessages);
+          }
+          if (data && data.chat_badges) {
+            updateBadges(data.chat_badges);
+          }
+        } catch (err) {
+          console.error('Support chat send error', err);
+        }
+      });
     }
+
+    poll();
+    setInterval(poll, 3000);
   })();
 </script>
 

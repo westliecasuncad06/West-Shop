@@ -6,21 +6,48 @@ require_role('seller');
 $u = current_user();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!csrf_verify()) { http_response_code(400); exit('Bad CSRF'); }
-    $action = $_POST['action'] ?? '';
-    $orderId = (int)($_POST['order_id'] ?? 0);
-    // Update order status only if this seller has at least one item in the order
-    if (in_array($action, ['Confirmed','Shipped','Delivered','Cancelled'], true)) {
-        // For simplicity, update entire order status.
-        $stmt = $pdo->prepare('UPDATE orders o
-            SET o.status = ?
-            WHERE o.order_id = ? AND EXISTS (
-              SELECT 1 FROM order_items oi JOIN products p ON oi.product_id=p.product_id
-              WHERE oi.order_id=o.order_id AND p.seller_id=?
-            )');
-        $stmt->execute([$action, $orderId, $u['user_id']]);
-        set_flash('success', 'Order status updated.');
+  if (!csrf_verify()) { http_response_code(400); exit('Bad CSRF'); }
+  $action = $_POST['action'] ?? '';
+  $orderId = (int)($_POST['order_id'] ?? 0);
+  $cancelReason = trim($_POST['cancel_reason'] ?? '');
+  $isCancel = ($action === 'Cancelled');
+  if ($isCancel && $cancelReason === '') {
+    set_flash('danger', 'Please add a short note explaining why the order is being cancelled.');
+  } elseif (in_array($action, ['Confirmed','Shipped','Delivered','Cancelled'], true)) {
+    $stmt = $pdo->prepare('UPDATE orders o
+      SET o.status = ?, o.cancel_reason = ?
+      WHERE o.order_id = ? AND EXISTS (
+        SELECT 1 FROM order_items oi JOIN products p ON oi.product_id=p.product_id
+        WHERE oi.order_id=o.order_id AND p.seller_id=?
+      )');
+    $stmt->execute([$action, $isCancel ? $cancelReason : null, $orderId, $u['user_id']]);
+    if ($stmt->rowCount() > 0) {
+      $buyerStmt = $pdo->prepare('SELECT buyer_id FROM orders WHERE order_id = ? LIMIT 1');
+      $buyerStmt->execute([$orderId]);
+      $buyerId = (int)($buyerStmt->fetchColumn() ?: 0);
+      if ($buyerId) {
+        if ($isCancel) {
+          $reasonText = $cancelReason ?: 'No reason provided';
+          create_notification($buyerId, sprintf('Order #%d was cancelled by the seller. Reason: %s', $orderId, $reasonText));
+          $profile = get_seller_profile((int)$u['user_id']);
+          $storeName = trim($profile['shop_name'] ?? '') ?: $u['name'];
+          $msg = sprintf('%s cancelled order #%d. Reason: %s', $storeName, $orderId, $reasonText);
+          send_chat_message((int)$u['user_id'], $buyerId, $msg);
+        } else {
+          create_notification($buyerId, sprintf('Order #%d status updated to %s.', $orderId, $action));
+          if ($action === 'Confirmed') {
+            $profile = get_seller_profile((int)$u['user_id']);
+            $storeName = trim($profile['shop_name'] ?? '') ?: $u['name'];
+            $msg = sprintf('%s confirmed your order #%d. We will notify you once it ships.', $storeName, $orderId);
+            send_chat_message((int)$u['user_id'], $buyerId, $msg);
+          }
+        }
+      }
+      set_flash('success', sprintf('Order #%d updated to %s.', $orderId, $action));
+    } else {
+      set_flash('warning', 'No matching order to update.');
     }
+  }
 }
 
 $orders = $pdo->prepare('SELECT DISTINCT o.* FROM orders o
@@ -47,14 +74,22 @@ include __DIR__ . '/../templates/header.php';
         <td><?php echo e($o['status']); ?></td>
         <td><?php echo e($o['created_at']); ?></td>
         <td>
-          <form method="post" class="d-flex gap-1">
-            <?php echo csrf_field(); ?>
-            <input type="hidden" name="order_id" value="<?php echo (int)$o['order_id']; ?>">
-            <button name="action" value="Confirmed" class="btn btn-sm btn-outline-secondary">Confirm</button>
-            <button name="action" value="Shipped" class="btn btn-sm btn-outline-primary">Ship</button>
-            <button name="action" value="Delivered" class="btn btn-sm btn-outline-success">Deliver</button>
-            <button name="action" value="Cancelled" class="btn btn-sm btn-outline-danger">Cancel</button>
-          </form>
+          <div class="d-flex flex-column gap-2">
+            <form method="post" class="d-flex gap-1 flex-wrap">
+              <?php echo csrf_field(); ?>
+              <input type="hidden" name="order_id" value="<?php echo (int)$o['order_id']; ?>">
+              <button name="action" value="Confirmed" class="btn btn-sm btn-outline-secondary">Confirm</button>
+              <button name="action" value="Shipped" class="btn btn-sm btn-outline-primary">Ship</button>
+              <button name="action" value="Delivered" class="btn btn-sm btn-outline-success">Deliver</button>
+            </form>
+            <form method="post" class="d-flex gap-2 flex-wrap align-items-center">
+              <?php echo csrf_field(); ?>
+              <input type="hidden" name="order_id" value="<?php echo (int)$o['order_id']; ?>">
+              <input type="hidden" name="action" value="Cancelled">
+              <input type="text" name="cancel_reason" class="form-control form-control-sm flex-grow-1" placeholder="Reason for cancellation" required>
+              <button class="btn btn-sm btn-outline-danger">Cancel</button>
+            </form>
+          </div>
         </td>
       </tr>
     <?php endforeach; ?>

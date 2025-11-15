@@ -83,7 +83,7 @@ $categoryCount = count($topCategories);
         <h5 class="mb-0">Find your perfect product</h5>
       </div>
       <form action="<?php echo e(base_url('public/search.php')); ?>" method="get" class="row g-3 align-items-end" id="searchForm">
-        <div class="col-12 col-md-4">
+        <div class="col-12 col-lg-4">
           <label class="form-label">Search products</label>
           <div class="input-group">
             <span class="input-group-text bg-white border-2" style="border-color:#e9ecef;border-radius:0.75rem 0 0 0.75rem;">
@@ -92,22 +92,29 @@ $categoryCount = count($topCategories);
             <input type="text" name="q" class="form-control border-start-0" placeholder="e.g. earbuds, hoodie" style="border-left:none!important;" />
           </div>
         </div>
-        <div class="col-6 col-md-3">
+        <div class="col-6 col-lg-2">
+          <label class="form-label">I want to find</label>
+          <select name="type" id="homeSearchType" class="form-select">
+            <option value="products">Products</option>
+            <option value="stores">Stores</option>
+          </select>
+        </div>
+        <div class="col-6 col-lg-2">
           <label class="form-label">Category</label>
-          <select name="cat" id="topCategory" class="form-select">
+          <select name="cat" id="homeTopCategory" class="form-select">
             <option value="">All Categories</option>
             <?php foreach($topCategories as $tc): ?>
               <option value="<?php echo (int)$tc['category_id']; ?>"><?php echo e($tc['name']); ?></option>
             <?php endforeach; ?>
           </select>
         </div>
-        <div class="col-6 col-md-3">
+        <div class="col-6 col-lg-2">
           <label class="form-label">Subcategory</label>
-          <select name="sub" id="subCategory" class="form-select" disabled>
+          <select name="sub" id="homeSubCategory" class="form-select" disabled>
             <option value="">Select Category First</option>
           </select>
         </div>
-        <div class="col-12 col-md-2 d-grid">
+        <div class="col-12 col-lg-2 d-grid">
           <button class="btn btn-outline-primary h-100">
             <i class="bi bi-funnel me-2"></i>Search
           </button>
@@ -194,24 +201,60 @@ $categoryCount = count($topCategories);
 </div>
 
 <script>
-document.getElementById('topCategory').addEventListener('change', function(){
-  const topId = this.value;
-  const subSelect = document.getElementById('subCategory');
-  subSelect.innerHTML = '<option value="">Loading...</option>';
-  subSelect.disabled = true;
-  if(!topId) { subSelect.innerHTML = '<option value="">Select Category First</option>'; return; }
-  fetch('<?php echo e(base_url('public/subcategories.php?parent=')); ?>'+encodeURIComponent(topId))
+const homeTopCategory = document.getElementById('homeTopCategory');
+const homeSubCategory = document.getElementById('homeSubCategory');
+const homeSearchType = document.getElementById('homeSearchType');
+
+function loadHomeSubCategories(topId) {
+  if (!homeSubCategory) { return; }
+  homeSubCategory.innerHTML = '<option value="">Loading...</option>';
+  homeSubCategory.disabled = true;
+  if (!topId) {
+    homeSubCategory.innerHTML = '<option value="">Select Category First</option>';
+    return;
+  }
+  fetch('<?php echo e(base_url('public/subcategories.php?parent=')); ?>' + encodeURIComponent(topId))
     .then(r => r.json())
     .then(data => {
-      subSelect.innerHTML = '<option value="">All Subcategories</option>';
-      data.forEach(function(c){
+      homeSubCategory.innerHTML = '<option value="">All Subcategories</option>';
+      data.forEach(sc => {
         const opt = document.createElement('option');
-        opt.value = c.category_id; opt.textContent = c.name; subSelect.appendChild(opt);
+        opt.value = sc.category_id;
+        opt.textContent = sc.name;
+        homeSubCategory.appendChild(opt);
       });
-      subSelect.disabled = false;
+      homeSubCategory.disabled = false;
     })
-    .catch(()=> { subSelect.innerHTML = '<option value="">Error loading</option>'; });
-});
+    .catch(() => {
+      homeSubCategory.innerHTML = '<option value="">Error loading</option>';
+    });
+}
+
+function handleHomeTypeChange() {
+  if (!homeSearchType || !homeTopCategory || !homeSubCategory) { return; }
+  const isStoreSearch = homeSearchType.value === 'stores';
+  if (isStoreSearch) {
+    homeTopCategory.value = '';
+    homeTopCategory.disabled = true;
+    homeSubCategory.innerHTML = '<option value="">Stores do not use categories</option>';
+    homeSubCategory.disabled = true;
+  } else {
+    homeTopCategory.disabled = false;
+    homeSubCategory.innerHTML = '<option value="">Select Category First</option>';
+    homeSubCategory.disabled = true;
+  }
+}
+
+if (homeTopCategory) {
+  homeTopCategory.addEventListener('change', function () {
+    if (homeSearchType && homeSearchType.value === 'stores') { return; }
+    loadHomeSubCategories(this.value);
+  });
+}
+if (homeSearchType) {
+  homeSearchType.addEventListener('change', handleHomeTypeChange);
+  handleHomeTypeChange();
+}
 </script>
 
 <?php include __DIR__ . '/templates/footer.php'; ?>

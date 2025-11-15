@@ -41,6 +41,7 @@
     <hr class="my-4">
     <div class="d-flex flex-wrap justify-content-between align-items-center small text-muted">
       <span>© <?php echo date('Y'); ?> <?php echo e(APP_NAME); ?> · All rights reserved.</span>
+      <span class="mt-2 mt-md-0">This prototype site is for portfolio purposes only and is not a functional storefront. Crafted by Westlie Casuncad, Full Stack Developer.</span>
       <div class="d-flex gap-3">
         <a href="#" class="text-muted text-decoration-none">Privacy</a>
         <a href="#" class="text-muted text-decoration-none">Terms</a>
@@ -50,5 +51,43 @@
   </div>
 </footer>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<?php if(isset($u) && $u): ?>
+<script>
+(function(){
+  const notifBadge = document.querySelector('[data-notif-count]');
+  const chatBadge = document.querySelector('[data-chat-count]');
+  const pulseEndpoint = '<?php echo e(base_url('public/pulse_counts.php')); ?>';
+  if(!pulseEndpoint) return;
+  const updateBadge = (el, value) => {
+    if(!el) return;
+    if(Number(value) > 0) {
+      el.textContent = value;
+      el.classList.remove('d-none');
+    } else {
+      el.classList.add('d-none');
+    }
+  };
+  const poll = async () => {
+    try {
+      const res = await fetch(pulseEndpoint, {credentials: 'same-origin'});
+      if(!res.ok) return;
+      const data = await res.json();
+      if(data) {
+        if(typeof data.notifications !== 'undefined') {
+          updateBadge(notifBadge, data.notifications);
+        }
+        if(typeof data.chat !== 'undefined') {
+          updateBadge(chatBadge, data.chat);
+        }
+      }
+    } catch (err) {
+      console.error('Pulse poll error', err);
+    }
+  };
+  poll();
+  setInterval(poll, 3000);
+})();
+</script>
+<?php endif; ?>
 </body>
 </html>

@@ -281,6 +281,10 @@ $topCatsStmt->execute();
 $topCategories = $topCatsStmt->fetchAll();
 $allCats = $pdo->query('SELECT * FROM categories ORDER BY name')->fetchAll();
 $subCategories = array_values(array_filter($allCats, function($c){ return !is_null($c['parent_id']); }));
+$categoryNamesById = [];
+foreach ($allCats as $cat) {
+  $categoryNamesById[(int)$cat['category_id']] = $cat['name'];
+}
 
 // Load products with optional search/category filters (for seller dashboard)
 $params = [$u['user_id']];
@@ -467,7 +471,7 @@ include __DIR__ . '/../templates/header.php';
               <?php echo csrf_field(); ?>
               <input type="hidden" name="action" value="upload_banner">
               <label class="btn btn-outline-primary w-100 mb-0">
-                <input type="file" name="image" accept="image/*" required hidden>
+                <input type="file" name="image" accept="image/*" required hidden class="auto-submit-upload">
                 Upload banner
               </label>
             </form>
@@ -485,7 +489,7 @@ include __DIR__ . '/../templates/header.php';
               <?php echo csrf_field(); ?>
               <input type="hidden" name="action" value="upload_logo">
               <label class="btn btn-outline-primary w-100 mb-0">
-                <input type="file" name="image" accept="image/*" required hidden>
+                <input type="file" name="image" accept="image/*" required hidden class="auto-submit-upload">
                 Upload logo
               </label>
             </form>
@@ -602,12 +606,22 @@ include __DIR__ . '/../templates/header.php';
         </div>
 
         <div class="card p-4 h-100">
-          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+          <?php
+            $fullTotal = count($products);
+            $previewProducts = array_slice($products, 0, 5);
+            $previewTotal = count($previewProducts);
+            $extraCount = max(0, $fullTotal - $previewTotal);
+          ?>
+          <div class="seller-catalog-preview__header mb-4">
             <div>
               <p class="section-label mb-1">Catalog</p>
-              <h5 class="mb-0">My Products</h5>
+              <h5 class="mb-1">My Products</h5>
+              <p class="text-muted small mb-0"><?php echo $fullTotal; ?> item<?php echo $fullTotal === 1 ? '' : 's'; ?> in your catalog</p>
             </div>
-            <a href="<?php echo e(base_url('seller/products.php')); ?>" class="pill-button pill-button--ghost">Open manager</a>
+            <div class="d-flex flex-wrap gap-2">
+              <a href="<?php echo e(base_url('seller/products.php')); ?>" class="pill-button pill-button--ghost">Open manager</a>
+              <a class="pill-button pill-button--mint" href="<?php echo e(base_url('seller/index.php#inventory')); ?>">Add listing</a>
+            </div>
           </div>
 
           <form method="get" class="row g-2 mb-4">
@@ -636,66 +650,53 @@ include __DIR__ . '/../templates/header.php';
             </div>
           </form>
 
-          <div class="table-modern overflow-auto">
-            <table class="table table-borderless align-middle mb-0">
-              <thead>
-                <tr>
-                  <th>Item</th>
-                  <th>Price</th>
-                  <th>Stock</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                <?php foreach($products as $p): ?>
-                  <tr>
-                    <td>
-                      <div class="product-row">
-                        <img src="<?php echo e($p['image'] && (strpos($p['image'],'http') === 0) ? $p['image'] : ($p['image'] ? base_url($p['image']) : base_url('assets/images/products/placeholder.png'))); ?>" alt="<?php echo e($p['name']); ?>">
-                        <div>
-                          <strong><?php echo e($p['name']); ?></strong>
-                          <p class="text-muted small mb-0">SKU #<?php echo (int)$p['product_id']; ?></p>
-                        </div>
-                      </div>
-                    </td>
-                    <td>$<?php echo number_format((float)$p['price'],2); ?></td>
-                    <td><?php echo (int)$p['stock']; ?></td>
-                    <td><span class="badge bg-<?php echo ($p['status']==='active'?'success':'secondary'); ?>"><?php echo e($p['status']); ?></span></td>
-                    <td class="text-end d-flex flex-wrap justify-content-end gap-2">
-                      <button class="btn btn-sm btn-outline-primary" data-bs-toggle="collapse" data-bs-target="#edit_<?php echo (int)$p['product_id']; ?>">Edit</button>
-                      <form method="post" onsubmit="return confirm('Delete this product?');">
-                        <?php echo csrf_field(); ?>
-                        <input type="hidden" name="action" value="delete_product">
-                        <input type="hidden" name="product_id" value="<?php echo (int)$p['product_id']; ?>">
-                        <button class="btn btn-sm btn-outline-danger">Delete</button>
-                      </form>
-                    </td>
-                  </tr>
-                  <tr class="collapse" id="edit_<?php echo (int)$p['product_id']; ?>">
-                    <td colspan="5" class="bg-light border-top">
-                      <form method="post" class="row g-2">
-                        <?php echo csrf_field(); ?>
-                        <input type="hidden" name="action" value="update_product">
-                        <input type="hidden" name="product_id" value="<?php echo (int)$p['product_id']; ?>">
-                        <div class="col-md-5"><input class="form-control" name="name" value="<?php echo e($p['name']); ?>" required></div>
-                        <div class="col-md-2"><input type="number" step="0.01" class="form-control" name="price" value="<?php echo e($p['price']); ?>" required></div>
-                        <div class="col-md-2"><input type="number" class="form-control" name="stock" value="<?php echo (int)$p['stock']; ?>" required></div>
-                        <div class="col-md-2">
-                          <select class="form-select" name="status">
-                            <option value="active" <?php echo ($p['status']==='active'?'selected':''); ?>>Active</option>
-                            <option value="inactive" <?php echo ($p['status']==='inactive'?'selected':''); ?>>Inactive</option>
-                          </select>
-                        </div>
-                        <div class="col-md-1 d-grid"><button class="btn btn-primary">Save</button></div>
-                      </form>
-                    </td>
-                  </tr>
-                <?php endforeach; ?>
-                <?php if(!$products): ?><tr><td colspan="5" class="text-center text-muted py-4">No products yet. Add your first listing to get traction.</td></tr><?php endif; ?>
-              </tbody>
-            </table>
-          </div>
+          <?php if($previewProducts): ?>
+            <div class="seller-catalog-grid seller-catalog-grid--preview">
+              <?php foreach($previewProducts as $p):
+                $imageSrc = ($p['image'] && strpos($p['image'], 'http') === 0)
+                  ? $p['image']
+                  : ($p['image'] ? base_url($p['image']) : base_url('assets/images/products/placeholder.png'));
+                $statusClass = $p['status'] === 'active' ? 'badge bg-success' : 'badge bg-secondary';
+                $categoryLabel = $categoryNamesById[$p['category_id'] ?? 0] ?? 'Uncategorized';
+                $lowStock = (int)$p['stock'] <= 5;
+                $timestamp = $p['updated_at'] ?? $p['created_at'] ?? null;
+                $timestampLabel = $timestamp ? date('M j, Y', strtotime($timestamp)) : '—';
+              ?>
+                <article class="seller-catalog-card">
+                  <div class="seller-catalog-card__thumb">
+                    <img src="<?php echo e($imageSrc); ?>" alt="<?php echo e($p['name']); ?>">
+                    <span class="seller-catalog-card__status <?php echo $statusClass; ?>"><?php echo e($p['status']); ?></span>
+                  </div>
+                  <div class="seller-catalog-card__body">
+                    <div class="seller-catalog-card__header">
+                      <h6 class="mb-0"><?php echo e($p['name']); ?></h6>
+                      <span class="seller-catalog-card__price">$<?php echo number_format((float)$p['price'], 2); ?></span>
+                    </div>
+                    <p class="seller-catalog-card__meta text-muted mb-2"><?php echo e($categoryLabel); ?> · SKU #<?php echo (int)$p['product_id']; ?></p>
+                    <div class="seller-catalog-card__stats">
+                      <span class="seller-catalog-chip <?php echo $lowStock ? 'seller-catalog-chip--alert' : ''; ?>">
+                        Stock <?php echo (int)$p['stock']; ?><?php echo $lowStock ? ' • Reorder soon' : ''; ?>
+                      </span>
+                      <span class="seller-catalog-chip">Updated <?php echo e($timestampLabel); ?></span>
+                    </div>
+                    <div class="seller-card-actions">
+                      <a class="btn btn-sm btn-outline-primary" href="<?php echo e(base_url('seller/products.php?focus=' . (int)$p['product_id'])); ?>">Manage</a>
+                      <a class="btn btn-sm btn-outline-secondary" href="<?php echo e(base_url('public/product.php?id=' . (int)$p['product_id'])); ?>" target="_blank" rel="noopener">Preview</a>
+                    </div>
+                  </div>
+                </article>
+              <?php endforeach; ?>
+            </div>
+            <?php if($extraCount > 0): ?>
+              <p class="text-muted small mt-3"><?php echo $extraCount; ?> more product<?php echo $extraCount === 1 ? '' : 's'; ?> in your catalog.</p>
+            <?php endif; ?>
+          <?php else: ?>
+            <div class="seller-catalog-preview__empty empty-panel">
+              <p class="fw-semibold mb-1">No products yet</p>
+              <p class="text-muted mb-3">List at least one item to unlock your storefront preview.</p>
+              <a class="btn btn-primary" href="<?php echo e(base_url('seller/index.php#inventory')); ?>">Add your first product</a>
+            </div>
+          <?php endif; ?>
         </div>
       </section>
 
@@ -889,5 +890,15 @@ include __DIR__ . '/../templates/header.php';
     }
     if (inputUrl){ inputUrl.addEventListener('input', handleLinkPreview); }
     if (inputG){ inputG.addEventListener('input', handleLinkPreview); }
+
+    // Auto-submit banner/logo upload forms as soon as a file is picked
+    var autoUploadInputs = document.querySelectorAll('.auto-submit-upload');
+    autoUploadInputs.forEach(function(inp){
+      inp.addEventListener('change', function(){
+        if (!inp.files || inp.files.length === 0) { return; }
+        var form = inp.closest('form');
+        if (form) { form.submit(); }
+      });
+    });
   })();
 </script>
